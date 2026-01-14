@@ -1,0 +1,9 @@
+{
+  "name": "zsh-tool",
+  "version": "0.1.0",
+  "description": "Zsh execution tool with NEVERHANG circuit breaker and A.L.A.N. short-term learning",
+  "author": {
+    "name": "Johnny5",
+    "email": "claude@arktechnwa.com"
+  }
+}
