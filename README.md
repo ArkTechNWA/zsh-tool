@@ -30,7 +30,7 @@ Short-term learning database with temporal decay:
 ## Additional Tools
 
 | Tool | Purpose |
-|------|---------||
+|------|---------|
 | `zsh_health` | Overall health status |
 | `zsh_alan_stats` | A.L.A.N. database statistics |
 | `zsh_alan_query` | Query pattern insights for a command |
