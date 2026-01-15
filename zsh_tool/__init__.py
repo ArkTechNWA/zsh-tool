@@ -6,4 +6,4 @@ PTY mode, yield-based oversight, NEVERHANG circuit breaker, A.L.A.N. learning.
 For Johnny5. For us.
 """
 
-__version__ = "0.3.0"
+__version__ = "0.3.1"
