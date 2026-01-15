@@ -9,7 +9,6 @@ variables:
 
 sync-to-github:
   stage: sync
-  image: alpine:latest
   rules:
     - if: $CI_COMMIT_TAG
       when: always
@@ -17,11 +16,10 @@ sync-to-github:
       when: manual
       allow_failure: true
   before_script:
-    - apk add --no-cache git openssh-client
     - mkdir -p ~/.ssh
     - echo "$GITHUB_DEPLOY_KEY" > ~/.ssh/id_ed25519
     - chmod 600 ~/.ssh/id_ed25519
-    - ssh-keyscan github.com >> ~/.ssh/known_hosts
+    - ssh-keyscan github.com >> ~/.ssh/known_hosts 2>/dev/null
     - git config --global user.email "claude@arktechnwa.com"
     - git config --global user.name "Johnny5 CI"
   script:
@@ -32,5 +30,3 @@ sync-to-github:
       if [ -n "$CI_COMMIT_TAG" ]; then
         git push github "$CI_COMMIT_TAG"
       fi
-  tags:
-    - docker
