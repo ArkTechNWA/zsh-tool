@@ -9,10 +9,15 @@ For Johnny5. For us.
 
 import anyio
 import asyncio
+import fcntl
 import hashlib
 import os
+import pty
 import re
+import select
 import sqlite3
+import struct
+import termios
 import time
 import uuid
 from contextlib import contextmanager
@@ -314,7 +319,7 @@ class LiveTask:
     """A running command with live output buffering."""
     task_id: str
     command: str
-    process: Any  # asyncio.subprocess.Process
+    process: Any  # asyncio.subprocess.Process or PID for PTY
     started_at: float
     timeout: int
     output_buffer: str = ""
@@ -322,6 +327,9 @@ class LiveTask:
     status: str = "running"  # running, completed, timeout, killed, error
     exit_code: Optional[int] = None
     error: Optional[str] = None
+    # PTY mode fields
+    is_pty: bool = False
+    pty_fd: Optional[int] = None  # Master PTY file descriptor
 
 
 # Active tasks registry
@@ -330,14 +338,22 @@ live_tasks: dict[str, LiveTask] = {}
 
 def _cleanup_task(task_id: str):
     """Clean up task resources."""
-    # Close stdin if still open
     if task_id in live_tasks:
         task = live_tasks[task_id]
-        if task.process.stdin and not task.process.stdin.is_closing():
-            try:
-                task.process.stdin.close()
-            except Exception:
-                pass
+        if task.is_pty:
+            # Close PTY file descriptor
+            if task.pty_fd is not None:
+                try:
+                    os.close(task.pty_fd)
+                except Exception:
+                    pass
+        else:
+            # Close stdin if still open
+            if task.process.stdin and not task.process.stdin.is_closing():
+                try:
+                    task.process.stdin.close()
+                except Exception:
+                    pass
 
 
 async def _output_collector(task: LiveTask):
@@ -390,6 +406,159 @@ async def _output_collector(task: LiveTask):
     except Exception as e:
         task.status = "error"
         task.error = str(e)
+
+
+async def _pty_output_collector(task: LiveTask):
+    """Background coroutine that collects output from a PTY."""
+    loop = asyncio.get_event_loop()
+
+    try:
+        while True:
+            # Check if process is still running
+            try:
+                pid_result = os.waitpid(task.process, os.WNOHANG)
+                if pid_result[0] != 0:
+                    # Process exited
+                    task.exit_code = os.WEXITSTATUS(pid_result[1]) if os.WIFEXITED(pid_result[1]) else -1
+                    task.status = "completed"
+                    circuit_breaker.record_success()
+                    break
+            except ChildProcessError:
+                # Process already reaped
+                task.status = "completed"
+                task.exit_code = 0
+                break
+
+            # Check timeout
+            elapsed = time.time() - task.started_at
+            if elapsed > task.timeout:
+                task.status = "timeout"
+                try:
+                    os.kill(task.process, 9)  # SIGKILL
+                except ProcessLookupError:
+                    pass
+                circuit_breaker.record_timeout(alan._hash_command(task.command))
+                break
+
+            # Read available output from PTY (non-blocking)
+            try:
+                # Use select to check if data available
+                readable, _, _ = select.select([task.pty_fd], [], [], 0.1)
+                if readable:
+                    chunk = os.read(task.pty_fd, 4096)
+                    if chunk:
+                        task.output_buffer += chunk.decode('utf-8', errors='replace')
+            except (OSError, IOError):
+                # PTY closed or error
+                break
+
+            # Small yield to not hog CPU
+            await asyncio.sleep(0.05)
+
+        # Read any remaining output
+        try:
+            while True:
+                readable, _, _ = select.select([task.pty_fd], [], [], 0.1)
+                if not readable:
+                    break
+                chunk = os.read(task.pty_fd, 4096)
+                if not chunk:
+                    break
+                task.output_buffer += chunk.decode('utf-8', errors='replace')
+        except (OSError, IOError):
+            pass
+
+        # Record in A.L.A.N.
+        duration_ms = int((time.time() - task.started_at) * 1000)
+        alan.record(
+            task.command,
+            task.exit_code or -1,
+            duration_ms,
+            task.status == "timeout",
+            task.output_buffer[:500],
+            ""
+        )
+        alan.maybe_prune()
+
+    except Exception as e:
+        task.status = "error"
+        task.error = str(e)
+
+
+async def execute_zsh_pty(
+    command: str,
+    timeout: int = NEVERHANG_TIMEOUT_DEFAULT,
+    yield_after: float = YIELD_AFTER_DEFAULT,
+    description: Optional[str] = None
+) -> dict:
+    """Execute command in a PTY for full terminal emulation."""
+
+    # Validate timeout
+    timeout = min(timeout, NEVERHANG_TIMEOUT_MAX)
+
+    # Check A.L.A.N. for pattern insights
+    pattern_stats = alan.get_pattern_stats(command)
+    warnings = []
+
+    if pattern_stats.get('known'):
+        if pattern_stats['timeout_rate'] > 0.5:
+            warnings.append(f"A.L.A.N.: {pattern_stats['timeout_rate']*100:.0f}% timeout rate for this pattern")
+        if pattern_stats.get('max_duration_ms', 0) > timeout * 1000 * 0.8:
+            warnings.append(f"A.L.A.N.: Similar commands took up to {pattern_stats['max_duration_ms']/1000:.1f}s")
+
+    # Check NEVERHANG circuit breaker
+    allowed, circuit_message = circuit_breaker.should_allow()
+    if not allowed:
+        return {
+            'success': False,
+            'error': circuit_message,
+            'circuit_status': circuit_breaker.get_status()
+        }
+    if circuit_message:
+        warnings.append(circuit_message)
+
+    # Create task ID
+    task_id = str(uuid.uuid4())[:8]
+
+    # Fork with PTY
+    pid, master_fd = pty.fork()
+
+    if pid == 0:
+        # Child process - exec zsh with command
+        os.execvp('/bin/zsh', ['/bin/zsh', '-c', command])
+        # If exec fails, exit
+        os._exit(1)
+
+    # Parent process - set up non-blocking read
+    flags = fcntl.fcntl(master_fd, fcntl.F_GETFL)
+    fcntl.fcntl(master_fd, fcntl.F_SETFL, flags | os.O_NONBLOCK)
+
+    # Set terminal size (80x24 default)
+    try:
+        winsize = struct.pack('HHHH', 24, 80, 0, 0)
+        fcntl.ioctl(master_fd, termios.TIOCSWINSZ, winsize)
+    except Exception:
+        pass
+
+    task = LiveTask(
+        task_id=task_id,
+        command=command,
+        process=pid,  # PID instead of Process object
+        started_at=time.time(),
+        timeout=timeout,
+        is_pty=True,
+        pty_fd=master_fd
+    )
+    live_tasks[task_id] = task
+
+    # Start background output collector
+    asyncio.create_task(_pty_output_collector(task))
+
+    # Wait for yield_after seconds or completion
+    await asyncio.sleep(min(yield_after, timeout))
+
+    # Check status and return
+    return _build_task_response(task, warnings)
 
 
 async def execute_zsh_yielding(
@@ -475,7 +644,8 @@ def _build_task_response(task: LiveTask, warnings: list = None) -> dict:
     }
 
     if task.status == "running":
-        result['has_stdin'] = task.process.stdin is not None
+        result['has_stdin'] = task.is_pty or (hasattr(task.process, 'stdin') and task.process.stdin is not None)
+        result['is_pty'] = task.is_pty
         result['message'] = f"Command running ({elapsed:.1f}s). Use zsh_poll to get more output, zsh_send to send input."
     elif task.status == "completed":
         result['success'] = task.exit_code == 0
@@ -510,7 +680,7 @@ async def poll_task(task_id: str) -> dict:
 
 
 async def send_to_task(task_id: str, input_text: str) -> dict:
-    """Send input to a task's stdin."""
+    """Send input to a task's stdin (pipe or PTY)."""
     if task_id not in live_tasks:
         return {'error': f'Unknown task: {task_id}', 'success': False}
 
@@ -519,14 +689,19 @@ async def send_to_task(task_id: str, input_text: str) -> dict:
     if task.status != "running":
         return {'error': f'Task not running (status: {task.status})', 'success': False}
 
-    if not task.process.stdin:
-        return {'error': 'No stdin available for this task', 'success': False}
-
     try:
-        # Write to process stdin
         data = input_text if input_text.endswith('\n') else input_text + '\n'
-        task.process.stdin.write(data.encode('utf-8'))
-        await task.process.stdin.drain()
+
+        if task.is_pty:
+            # Write to PTY master
+            os.write(task.pty_fd, data.encode('utf-8'))
+        else:
+            # Write to process stdin pipe
+            if not task.process.stdin:
+                return {'error': 'No stdin available for this task', 'success': False}
+            task.process.stdin.write(data.encode('utf-8'))
+            await task.process.stdin.drain()
+
         return {'success': True, 'message': f'Sent {len(input_text)} chars to task {task_id}'}
     except Exception as e:
         return {'error': f'Failed to send input: {e}', 'success': False}
@@ -543,8 +718,18 @@ async def kill_task(task_id: str) -> dict:
         return {'error': f'Task not running (status: {task.status})', 'success': False}
 
     try:
-        task.process.kill()
-        await task.process.wait()
+        if task.is_pty:
+            # Kill PTY process by PID
+            os.kill(task.process, 9)  # SIGKILL
+            # Wait for process to be reaped
+            try:
+                os.waitpid(task.process, 0)
+            except ChildProcessError:
+                pass
+        else:
+            task.process.kill()
+            await task.process.wait()
+
         task.status = "killed"
         _cleanup_task(task_id)
         return {'success': True, 'message': f'Task {task_id} killed'}
@@ -598,6 +783,10 @@ async def list_tools() -> list[Tool]:
                     "description": {
                         "type": "string",
                         "description": "Human-readable description of what this command does"
+                    },
+                    "pty": {
+                        "type": "boolean",
+                        "description": "Use PTY (pseudo-terminal) mode for full terminal emulation. Enables proper handling of interactive prompts, colors, and programs that require a TTY."
                     }
                 },
                 "required": ["command"]
@@ -697,12 +886,21 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
     import json
 
     if name == "zsh":
-        result = await execute_zsh_yielding(
-            command=arguments["command"],
-            timeout=arguments.get("timeout", NEVERHANG_TIMEOUT_DEFAULT),
-            yield_after=arguments.get("yield_after", YIELD_AFTER_DEFAULT),
-            description=arguments.get("description")
-        )
+        use_pty = arguments.get("pty", False)
+        if use_pty:
+            result = await execute_zsh_pty(
+                command=arguments["command"],
+                timeout=arguments.get("timeout", NEVERHANG_TIMEOUT_DEFAULT),
+                yield_after=arguments.get("yield_after", YIELD_AFTER_DEFAULT),
+                description=arguments.get("description")
+            )
+        else:
+            result = await execute_zsh_yielding(
+                command=arguments["command"],
+                timeout=arguments.get("timeout", NEVERHANG_TIMEOUT_DEFAULT),
+                yield_after=arguments.get("yield_after", YIELD_AFTER_DEFAULT),
+                description=arguments.get("description")
+            )
         return _format_task_output(result)
     elif name == "zsh_poll":
         result = await poll_task(arguments["task_id"])
