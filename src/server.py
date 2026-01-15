@@ -303,21 +303,114 @@ class CircuitBreaker:
 alan = ALAN(ALAN_DB_PATH)
 circuit_breaker = CircuitBreaker()
 
-# Background tasks tracking
-background_tasks: dict[str, dict] = {}
-
-
 # =============================================================================
-# Zsh Execution
+# Live Task Manager (Issue #1: Yield-based execution with oversight)
 # =============================================================================
 
-async def execute_zsh(
+YIELD_AFTER_DEFAULT = 7.0  # Seconds before yielding control back
+
+@dataclass
+class LiveTask:
+    """A running command with live output buffering and stdin pipe."""
+    task_id: str
+    command: str
+    process: Any  # asyncio.subprocess.Process
+    started_at: float
+    timeout: int
+    stdin_pipe: Optional[str] = None  # Path to named pipe for stdin
+    output_buffer: str = ""
+    output_read_pos: int = 0  # How much output has been returned to caller
+    status: str = "running"  # running, completed, timeout, killed, error
+    exit_code: Optional[int] = None
+    error: Optional[str] = None
+
+
+# Active tasks registry
+live_tasks: dict[str, LiveTask] = {}
+
+
+def _create_stdin_pipe(task_id: str) -> str:
+    """Create a named pipe for sending input to a running command."""
+    pipe_path = f"/tmp/zsh-tool-stdin-{task_id}"
+    try:
+        if os.path.exists(pipe_path):
+            os.unlink(pipe_path)
+        os.mkfifo(pipe_path)
+    except OSError:
+        pass  # May fail if already exists as regular file
+    return pipe_path
+
+
+def _cleanup_task(task_id: str):
+    """Clean up task resources."""
+    if task_id in live_tasks:
+        task = live_tasks[task_id]
+        if task.stdin_pipe and os.path.exists(task.stdin_pipe):
+            try:
+                os.unlink(task.stdin_pipe)
+            except OSError:
+                pass
+
+
+async def _output_collector(task: LiveTask):
+    """Background coroutine that collects output from a running process."""
+    try:
+        while True:
+            # Read available output (non-blocking style via small reads)
+            try:
+                chunk = await asyncio.wait_for(
+                    task.process.stdout.read(4096),
+                    timeout=0.1
+                )
+                if chunk:
+                    task.output_buffer += chunk.decode('utf-8', errors='replace')
+                elif task.process.returncode is not None:
+                    # Process finished
+                    break
+            except asyncio.TimeoutError:
+                # No data available right now, check if process done
+                if task.process.returncode is not None:
+                    break
+                # Check overall timeout
+                elapsed = time.time() - task.started_at
+                if elapsed > task.timeout:
+                    task.status = "timeout"
+                    task.process.kill()
+                    await task.process.wait()
+                    circuit_breaker.record_timeout(alan._hash_command(task.command))
+                    break
+                continue
+
+        # Process completed
+        if task.status == "running":
+            task.status = "completed"
+            task.exit_code = task.process.returncode
+            circuit_breaker.record_success()
+
+        # Record in A.L.A.N.
+        duration_ms = int((time.time() - task.started_at) * 1000)
+        alan.record(
+            task.command,
+            task.exit_code or -1,
+            duration_ms,
+            task.status == "timeout",
+            task.output_buffer[:500],
+            ""
+        )
+        alan.maybe_prune()
+
+    except Exception as e:
+        task.status = "error"
+        task.error = str(e)
+
+
+async def execute_zsh_yielding(
     command: str,
     timeout: int = NEVERHANG_TIMEOUT_DEFAULT,
-    description: Optional[str] = None,
-    run_in_background: bool = False
+    yield_after: float = YIELD_AFTER_DEFAULT,
+    description: Optional[str] = None
 ) -> dict:
-    """Execute a zsh command with NEVERHANG and A.L.A.N. integration."""
+    """Execute with yield - returns partial output after yield_after seconds if still running."""
 
     # Validate timeout
     timeout = min(timeout, NEVERHANG_TIMEOUT_MAX)
@@ -328,7 +421,7 @@ async def execute_zsh(
 
     if pattern_stats.get('known'):
         if pattern_stats['timeout_rate'] > 0.5:
-            warnings.append(f"A.L.A.N.: This command pattern has {pattern_stats['timeout_rate']*100:.0f}% timeout rate")
+            warnings.append(f"A.L.A.N.: {pattern_stats['timeout_rate']*100:.0f}% timeout rate for this pattern")
         if pattern_stats.get('max_duration_ms', 0) > timeout * 1000 * 0.8:
             warnings.append(f"A.L.A.N.: Similar commands took up to {pattern_stats['max_duration_ms']/1000:.1f}s")
 
@@ -343,112 +436,163 @@ async def execute_zsh(
     if circuit_message:
         warnings.append(circuit_message)
 
-    # Background execution
-    if run_in_background:
-        task_id = str(uuid.uuid4())[:8]
-        output_file = Path(f"/tmp/zsh-tool-{task_id}.out")
+    # Create task
+    task_id = str(uuid.uuid4())[:8]
+    stdin_pipe = _create_stdin_pipe(task_id)
 
-        # Start background process
+    # Start process with stdin from pipe (or /dev/null if pipe fails)
+    try:
+        # Open stdin pipe for reading (non-blocking)
+        stdin_fd = os.open(stdin_pipe, os.O_RDONLY | os.O_NONBLOCK)
         proc = await asyncio.create_subprocess_shell(
             command,
+            stdin=stdin_fd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,  # Merge stderr into stdout
+            executable='/bin/zsh'
+        )
+        os.close(stdin_fd)
+    except OSError:
+        # Fallback: no stdin pipe
+        proc = await asyncio.create_subprocess_shell(
+            command,
+            stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
             executable='/bin/zsh'
         )
+        stdin_pipe = None
 
-        background_tasks[task_id] = {
-            'pid': proc.pid,
-            'command': command[:100],
-            'started_at': time.time(),
-            'output_file': str(output_file),
-            'process': proc
-        }
+    task = LiveTask(
+        task_id=task_id,
+        command=command,
+        process=proc,
+        started_at=time.time(),
+        timeout=timeout,
+        stdin_pipe=stdin_pipe
+    )
+    live_tasks[task_id] = task
 
-        # Fire and forget - collect output in background
-        async def collect_output():
-            try:
-                stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout)
-                output_file.write_text(stdout.decode('utf-8', errors='replace'))
-                background_tasks[task_id]['completed'] = True
-                background_tasks[task_id]['exit_code'] = proc.returncode
-            except asyncio.TimeoutError:
-                proc.kill()
-                output_file.write_text("[TIMEOUT]")
-                background_tasks[task_id]['timed_out'] = True
+    # Start background output collector
+    asyncio.create_task(_output_collector(task))
 
-        asyncio.create_task(collect_output())
+    # Wait for yield_after seconds or completion
+    await asyncio.sleep(min(yield_after, timeout))
 
-        return {
-            'success': True,
-            'background': True,
-            'task_id': task_id,
-            'output_file': str(output_file),
-            'message': f"Background task started. Check output with: cat {output_file}",
-            'warnings': warnings if warnings else None
-        }
+    # Check status and return
+    return _build_task_response(task, warnings)
 
-    # Foreground execution
-    start_time = time.time()
-    timed_out = False
+
+def _build_task_response(task: LiveTask, warnings: list = None) -> dict:
+    """Build response dict from task state."""
+    # Get new output since last read
+    new_output = task.output_buffer[task.output_read_pos:]
+    task.output_read_pos = len(task.output_buffer)
+
+    # Truncate if needed
+    if len(new_output) > TRUNCATE_OUTPUT_AT:
+        new_output = new_output[:TRUNCATE_OUTPUT_AT] + f"\n[TRUNCATED - {len(new_output)} chars total]"
+
+    elapsed = time.time() - task.started_at
+
+    result = {
+        'task_id': task.task_id,
+        'status': task.status,
+        'output': new_output,
+        'elapsed_seconds': round(elapsed, 1),
+    }
+
+    if task.status == "running":
+        result['stdin_pipe'] = task.stdin_pipe
+        result['message'] = f"Command running ({elapsed:.1f}s). Use zsh_poll to get more output, zsh_send to send input."
+    elif task.status == "completed":
+        result['success'] = task.exit_code == 0
+        result['exit_code'] = task.exit_code
+        _cleanup_task(task.task_id)
+    elif task.status == "timeout":
+        result['success'] = False
+        result['error'] = f"Command timed out after {task.timeout}s"
+        _cleanup_task(task.task_id)
+    elif task.status == "killed":
+        result['success'] = False
+        result['error'] = "Command was killed"
+        _cleanup_task(task.task_id)
+    elif task.status == "error":
+        result['success'] = False
+        result['error'] = task.error
+        _cleanup_task(task.task_id)
+
+    if warnings:
+        result['warnings'] = warnings
+
+    return result
+
+
+async def poll_task(task_id: str) -> dict:
+    """Get current output from a running task."""
+    if task_id not in live_tasks:
+        return {'error': f'Unknown task: {task_id}', 'success': False}
+
+    task = live_tasks[task_id]
+    return _build_task_response(task)
+
+
+async def send_to_task(task_id: str, input_text: str) -> dict:
+    """Send input to a task's stdin pipe."""
+    if task_id not in live_tasks:
+        return {'error': f'Unknown task: {task_id}', 'success': False}
+
+    task = live_tasks[task_id]
+
+    if task.status != "running":
+        return {'error': f'Task not running (status: {task.status})', 'success': False}
+
+    if not task.stdin_pipe:
+        return {'error': 'No stdin pipe available for this task', 'success': False}
 
     try:
-        proc = await asyncio.create_subprocess_shell(
-            command,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            executable='/bin/zsh'
-        )
-
-        try:
-            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
-        except asyncio.TimeoutError:
-            proc.kill()
-            await proc.wait()
-            timed_out = True
-            stdout = b""
-            stderr = f"Command timed out after {timeout}s".encode()
-            circuit_breaker.record_timeout(alan._hash_command(command))
-
-        duration_ms = int((time.time() - start_time) * 1000)
-        exit_code = proc.returncode if not timed_out else -1
-
-        stdout_str = stdout.decode('utf-8', errors='replace')
-        stderr_str = stderr.decode('utf-8', errors='replace')
-
-        # Record in A.L.A.N.
-        alan.record(command, exit_code, duration_ms, timed_out, stdout_str, stderr_str)
-        alan.maybe_prune()
-
-        # Update circuit breaker on success
-        if not timed_out:
-            circuit_breaker.record_success()
-
-        # Truncate output if needed (match Bash tool behavior)
-        if len(stdout_str) > TRUNCATE_OUTPUT_AT:
-            stdout_str = stdout_str[:TRUNCATE_OUTPUT_AT] + f"\n\n[OUTPUT TRUNCATED - {len(stdout_str)} chars total]"
-        if len(stderr_str) > TRUNCATE_OUTPUT_AT:
-            stderr_str = stderr_str[:TRUNCATE_OUTPUT_AT] + f"\n\n[OUTPUT TRUNCATED - {len(stderr_str)} chars total]"
-
-        result = {
-            'success': exit_code == 0 and not timed_out,
-            'exit_code': exit_code,
-            'stdout': stdout_str,
-            'stderr': stderr_str if stderr_str else None,
-            'duration_ms': duration_ms,
-            'timed_out': timed_out
-        }
-
-        if warnings:
-            result['warnings'] = warnings
-
-        return result
-
+        # Write to the named pipe
+        with open(task.stdin_pipe, 'w') as f:
+            f.write(input_text)
+            if not input_text.endswith('\n'):
+                f.write('\n')
+        return {'success': True, 'message': f'Sent {len(input_text)} chars to task {task_id}'}
     except Exception as e:
-        return {
-            'success': False,
-            'error': str(e),
-            'warnings': warnings if warnings else None
-        }
+        return {'error': f'Failed to send input: {e}', 'success': False}
+
+
+async def kill_task(task_id: str) -> dict:
+    """Kill a running task."""
+    if task_id not in live_tasks:
+        return {'error': f'Unknown task: {task_id}', 'success': False}
+
+    task = live_tasks[task_id]
+
+    if task.status != "running":
+        return {'error': f'Task not running (status: {task.status})', 'success': False}
+
+    try:
+        task.process.kill()
+        await task.process.wait()
+        task.status = "killed"
+        _cleanup_task(task_id)
+        return {'success': True, 'message': f'Task {task_id} killed'}
+    except Exception as e:
+        return {'error': f'Failed to kill task: {e}', 'success': False}
+
+
+def list_tasks() -> dict:
+    """List all active tasks."""
+    tasks = []
+    for tid, task in live_tasks.items():
+        tasks.append({
+            'task_id': tid,
+            'command': task.command[:50] + ('...' if len(task.command) > 50 else ''),
+            'status': task.status,
+            'elapsed_seconds': round(time.time() - task.started_at, 1),
+            'output_bytes': len(task.output_buffer)
+        })
+    return {'tasks': tasks, 'count': len(tasks)}
 
 
 # =============================================================================
@@ -464,7 +608,7 @@ async def list_tools() -> list[Tool]:
     return [
         Tool(
             name="zsh",
-            description="Execute a zsh command with NEVERHANG circuit breaker and A.L.A.N. learning. Full parity with Bash tool.",
+            description="Execute a zsh command with yield-based oversight. Returns after yield_after seconds with partial output if still running. Use zsh_poll to continue collecting output.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -474,19 +618,70 @@ async def list_tools() -> list[Tool]:
                     },
                     "timeout": {
                         "type": "integer",
-                        "description": f"Timeout in seconds (default: {NEVERHANG_TIMEOUT_DEFAULT}, max: {NEVERHANG_TIMEOUT_MAX})"
+                        "description": f"Max execution time in seconds (default: {NEVERHANG_TIMEOUT_DEFAULT}, max: {NEVERHANG_TIMEOUT_MAX})"
+                    },
+                    "yield_after": {
+                        "type": "number",
+                        "description": f"Return control after this many seconds if still running (default: {YIELD_AFTER_DEFAULT})"
                     },
                     "description": {
                         "type": "string",
                         "description": "Human-readable description of what this command does"
-                    },
-                    "run_in_background": {
-                        "type": "boolean",
-                        "description": "Run command in background, returns task_id for later retrieval"
                     }
                 },
                 "required": ["command"]
             }
+        ),
+        Tool(
+            name="zsh_poll",
+            description="Get more output from a running task. Call repeatedly until status is not 'running'.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "task_id": {
+                        "type": "string",
+                        "description": "Task ID returned from zsh command"
+                    }
+                },
+                "required": ["task_id"]
+            }
+        ),
+        Tool(
+            name="zsh_send",
+            description="Send input to a running task's stdin. Use for interactive commands that need input.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "task_id": {
+                        "type": "string",
+                        "description": "Task ID of the running command"
+                    },
+                    "input": {
+                        "type": "string",
+                        "description": "Text to send to stdin (newline added automatically)"
+                    }
+                },
+                "required": ["task_id", "input"]
+            }
+        ),
+        Tool(
+            name="zsh_kill",
+            description="Kill a running task.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "task_id": {
+                        "type": "string",
+                        "description": "Task ID to kill"
+                    }
+                },
+                "required": ["task_id"]
+            }
+        ),
+        Tool(
+            name="zsh_tasks",
+            description="List all active tasks with their status.",
+            inputSchema={"type": "object", "properties": {}}
         ),
         Tool(
             name="zsh_health",
@@ -531,20 +726,28 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
     import json
 
     if name == "zsh":
-        result = await execute_zsh(
+        result = await execute_zsh_yielding(
             command=arguments["command"],
             timeout=arguments.get("timeout", NEVERHANG_TIMEOUT_DEFAULT),
-            description=arguments.get("description"),
-            run_in_background=arguments.get("run_in_background", False)
+            yield_after=arguments.get("yield_after", YIELD_AFTER_DEFAULT),
+            description=arguments.get("description")
         )
-        # Format zsh output cleanly - stdout first, then metadata
-        return _format_zsh_output(result)
+        return _format_task_output(result)
+    elif name == "zsh_poll":
+        result = await poll_task(arguments["task_id"])
+        return _format_task_output(result)
+    elif name == "zsh_send":
+        result = await send_to_task(arguments["task_id"], arguments["input"])
+    elif name == "zsh_kill":
+        result = await kill_task(arguments["task_id"])
+    elif name == "zsh_tasks":
+        result = list_tasks()
     elif name == "zsh_health":
         result = {
             'status': 'healthy',
             'neverhang': circuit_breaker.get_status(),
             'alan': alan.get_stats(),
-            'background_tasks': len(background_tasks)
+            'active_tasks': len(live_tasks)
         }
     elif name == "zsh_alan_stats":
         result = alan.get_stats()
@@ -566,40 +769,44 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
     )]
 
 
-def _format_zsh_output(result: dict) -> list[TextContent]:
-    """Format zsh execution output cleanly."""
+def _format_task_output(result: dict) -> list[TextContent]:
+    """Format task-based execution output cleanly."""
     parts = []
 
-    # stdout first - clean, no escaping
-    stdout = result.get('stdout', '')
-    if stdout:
-        parts.append(stdout.rstrip('\n'))
+    # Output first - clean
+    output = result.get('output', '')
+    if output:
+        parts.append(output.rstrip('\n'))
 
-    # stderr if present
-    stderr = result.get('stderr')
-    if stderr:
-        parts.append(f"[stderr]\n{stderr.rstrip()}")
+    # Error message if present
+    error = result.get('error')
+    if error:
+        parts.append(f"[error] {error}")
 
-    # Error message if failed
-    if not result.get('success', True):
-        error = result.get('error')
-        if error:
-            parts.append(f"[error] {error}")
+    # Status line
+    status = result.get('status', 'unknown')
+    task_id = result.get('task_id', '')
+    elapsed = result.get('elapsed_seconds', 0)
 
-    # Metadata line for non-success or special conditions
-    meta = []
-    if result.get('timed_out'):
-        meta.append("TIMEOUT")
-    if result.get('exit_code', 0) != 0:
-        meta.append(f"exit={result.get('exit_code')}")
+    if status == "running":
+        stdin_pipe = result.get('stdin_pipe', '')
+        parts.append(f"[RUNNING task_id={task_id} elapsed={elapsed}s stdin_pipe={stdin_pipe}]")
+        parts.append("Use zsh_poll to continue, zsh_send to input, zsh_kill to stop.")
+    elif status == "completed":
+        exit_code = result.get('exit_code', 0)
+        if exit_code == 0:
+            parts.append(f"[COMPLETED task_id={task_id} elapsed={elapsed}s exit=0]")
+        else:
+            parts.append(f"[COMPLETED task_id={task_id} elapsed={elapsed}s exit={exit_code}]")
+    elif status == "timeout":
+        parts.append(f"[TIMEOUT task_id={task_id} elapsed={elapsed}s]")
+    elif status == "killed":
+        parts.append(f"[KILLED task_id={task_id} elapsed={elapsed}s]")
+    elif status == "error":
+        parts.append(f"[ERROR task_id={task_id} elapsed={elapsed}s]")
+
     if result.get('warnings'):
-        meta.append(f"warnings={result['warnings']}")
-    if result.get('background'):
-        meta.append(f"task_id={result.get('task_id')}")
-        meta.append(f"output_file={result.get('output_file')}")
-
-    if meta:
-        parts.append(f"[{', '.join(meta)}]")
+        parts.append(f"[warnings: {result['warnings']}]")
 
     return [TextContent(type="text", text='\n'.join(parts) if parts else "(no output)")]
 
