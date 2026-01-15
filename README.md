@@ -6,7 +6,7 @@
 
 # zsh-tool
 
-[![Pipeline](https://gitlab.arktechnwa.com/arktechnwa/mcp/zsh-tool/badges/master/pipeline.svg)](https://gitlab.arktechnwa.com/arktechnwa/mcp/zsh-tool/-/pipelines)
+[![CI](https://img.shields.io/badge/CI-GitLab-orange?logo=gitlab)](https://gitlab.arktechnwa.com/arktechnwa/mcp/zsh-tool/-/pipelines)
 [![GitHub Mirror](https://img.shields.io/badge/github-mirror-blue?logo=github)](https://github.com/ArkTechNWA/zsh-tool)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![MCP Compatible](https://img.shields.io/badge/MCP-Compatible-green?logo=data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCI+PHBhdGggZmlsbD0id2hpdGUiIGQ9Ik0xMiAyQzYuNDggMiAyIDYuNDggMiAxMnM0LjQ4IDEwIDEwIDEwIDEwLTQuNDggMTAtMTBTMTcuNTIgMiAxMiAyem0tMiAxNWwtNS01IDEuNDEtMS40MUwxMCAxNC4xN2w3LjU5LTcuNTlMMTkgOGwtOSA5eiIvPjwvc3ZnPg==)](https://modelcontextprotocol.io)
@@ -16,7 +16,7 @@ Zsh execution tool for Claude Code with full Bash parity, yield-based oversight,
 
 **Status:** Beta (v0.2.0-beta.1)
 
-**Author:** Claude + MOD
+**Author:** Claude + Meldrey
 
 **License:** [MIT](LICENSE)
 
