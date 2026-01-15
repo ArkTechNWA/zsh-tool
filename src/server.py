@@ -555,7 +555,15 @@ async def execute_zsh_pty(
     asyncio.create_task(_pty_output_collector(task))
 
     # Wait for yield_after seconds or completion
-    await asyncio.sleep(min(yield_after, timeout))
+    # Shield against MCP abort - always return gracefully
+    try:
+        await asyncio.wait_for(
+            asyncio.shield(asyncio.sleep(min(yield_after, timeout))),
+            timeout=min(yield_after, timeout) + 1.0  # Slight buffer
+        )
+    except (asyncio.CancelledError, asyncio.TimeoutError):
+        # MCP aborted or timed out - still return what we have
+        warnings.append("MCP call interrupted - returning partial result")
 
     # Check status and return
     return _build_task_response(task, warnings)
@@ -618,7 +626,15 @@ async def execute_zsh_yielding(
     asyncio.create_task(_output_collector(task))
 
     # Wait for yield_after seconds or completion
-    await asyncio.sleep(min(yield_after, timeout))
+    # Shield against MCP abort - always return gracefully
+    try:
+        await asyncio.wait_for(
+            asyncio.shield(asyncio.sleep(min(yield_after, timeout))),
+            timeout=min(yield_after, timeout) + 1.0  # Slight buffer
+        )
+    except (asyncio.CancelledError, asyncio.TimeoutError):
+        # MCP aborted or timed out - still return what we have
+        warnings.append("MCP call interrupted - returning partial result")
 
     # Check status and return
     return _build_task_response(task, warnings)
@@ -883,6 +899,25 @@ async def list_tools() -> list[Tool]:
 @server.call_tool()
 async def call_tool(name: str, arguments: dict) -> list[TextContent]:
     """Handle tool calls."""
+    import json
+
+    # Protect against MCP abort - wrap entire handler
+    try:
+        return await _handle_tool_call(name, arguments)
+    except asyncio.CancelledError:
+        # MCP aborted - return graceful error instead of propagating
+        return [TextContent(
+            type="text",
+            text=json.dumps({
+                'success': False,
+                'error': 'MCP call was cancelled',
+                'hint': 'Use zsh_tasks to check for running tasks'
+            }, indent=2)
+        )]
+
+
+async def _handle_tool_call(name: str, arguments: dict) -> list[TextContent]:
+    """Internal tool call handler."""
     import json
 
     if name == "zsh":
