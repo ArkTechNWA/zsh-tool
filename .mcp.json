@@ -2,10 +2,10 @@
   "mcpServers": {
     "zsh-tool": {
       "type": "stdio",
-      "command": "${CLAUDE_PLUGIN_ROOT}/.venv/bin/python",
-      "args": ["${CLAUDE_PLUGIN_ROOT}/src/server.py"],
+      "command": "/home/meldrey/.claude/plugins/zsh-tool/.venv/bin/python",
+      "args": ["/home/meldrey/.claude/plugins/zsh-tool/src/server.py"],
       "env": {
-        "ALAN_DB_PATH": "${CLAUDE_PLUGIN_ROOT}/data/alan.db",
+        "ALAN_DB_PATH": "/home/meldrey/.claude/plugins/zsh-tool/data/alan.db",
         "NEVERHANG_TIMEOUT_DEFAULT": "120",
         "NEVERHANG_TIMEOUT_MAX": "600"
       }

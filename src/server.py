@@ -7,6 +7,7 @@ Full-parity zsh execution with NEVERHANG circuit breaker and A.L.A.N. learning.
 For Johnny5. For us.
 """
 
+import anyio
 import asyncio
 import hashlib
 import os
@@ -604,8 +605,16 @@ def _format_zsh_output(result: dict) -> list[TextContent]:
 
 
 async def main():
-    async with stdio_server() as (read_stream, write_stream):
-        await server.run(read_stream, write_stream, server.create_initialization_options())
+    try:
+        async with stdio_server() as (read_stream, write_stream):
+            await server.run(read_stream, write_stream, server.create_initialization_options())
+    except* anyio.ClosedResourceError:
+        # Graceful shutdown when stdin closes (normal for MCP stdio transport)
+        pass
+    except* Exception as eg:
+        # Log unexpected errors but don't crash
+        import sys
+        print(f"zsh-tool: unexpected error: {eg}", file=sys.stderr)
 
 
 if __name__ == '__main__':
