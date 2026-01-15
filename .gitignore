@@ -20,3 +20,9 @@ __pycache__/
 # OS
 .DS_Store
 Thumbs.db
+# MCP Registry tokens
+.mcpregistry_*
+
+# Build artifacts
+dist/
+*.egg-info/

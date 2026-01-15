@@ -1,0 +1,56 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.ArkTechNWA/zsh-tool",
+  "displayName": "zsh-tool",
+  "description": "Zsh for Claude Code. PTY mode lets Claude type passwords. NEVERHANG + A.L.A.N.",
+  "icons": [
+    {
+      "src": "https://raw.githubusercontent.com/ArkTechNWA/zsh-tool/master/logo.png",
+      "sizes": ["200x200"],
+      "mimeType": "image/png"
+    }
+  ],
+  "repository": {
+    "url": "https://github.com/ArkTechNWA/zsh-tool",
+    "source": "github"
+  },
+  "license": "MIT",
+  "version": "0.2.1",
+  "authors": [
+    {
+      "name": "ArkTechNWA",
+      "url": "https://github.com/ArkTechNWA"
+    }
+  ],
+  "packages": [
+    {
+      "registryType": "pypi",
+      "registryBaseUrl": "https://pypi.org",
+      "identifier": "zsh-tool-mcp",
+      "version": "0.2.1",
+      "runtimeHint": "uvx",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "ALAN_DB_PATH",
+          "description": "Path to A.L.A.N. SQLite database",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false
+        }
+      ]
+    }
+  ],
+  "tools": [
+    {"name": "zsh", "description": "Execute zsh command with yield-based oversight"},
+    {"name": "zsh_poll", "description": "Get more output from running task"},
+    {"name": "zsh_send", "description": "Send input to task's stdin (passwords, prompts)"},
+    {"name": "zsh_kill", "description": "Kill a running task"},
+    {"name": "zsh_tasks", "description": "List all active tasks"},
+    {"name": "zsh_health", "description": "Health status with NEVERHANG and A.L.A.N. metrics"},
+    {"name": "zsh_neverhang_status", "description": "Circuit breaker state"},
+    {"name": "zsh_neverhang_reset", "description": "Reset circuit breaker"}
+  ]
+}

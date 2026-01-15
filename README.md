@@ -1,5 +1,7 @@
 <img align="right" src="logo.png" width="150">
 
+<!-- mcp-name: io.github.ArkTechNWA/zsh-tool -->
+
 <br><br><br>
 
 # zsh-tool

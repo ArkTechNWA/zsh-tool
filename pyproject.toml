@@ -1,0 +1,43 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "zsh-tool-mcp"
+version = "0.2.1"
+description = "Zsh for Claude Code. PTY mode lets Claude type passwords. NEVERHANG + A.L.A.N."
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.10"
+authors = [
+    {name = "ArkTechNWA", email = "claude@arktechnwa.com"}
+]
+keywords = ["mcp", "claude", "zsh", "shell", "cli", "anthropic"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: System :: Shells",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+dependencies = [
+    "mcp>=1.0.0",
+    "anyio>=4.0.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/ArkTechNWA/zsh-tool"
+Repository = "https://github.com/ArkTechNWA/zsh-tool.git"
+Issues = "https://github.com/ArkTechNWA/zsh-tool/issues"
+
+[project.scripts]
+zsh-tool-mcp = "zsh_tool.server:run"
+
+[tool.hatch.build.targets.wheel]
+packages = ["zsh_tool"]
