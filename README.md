@@ -14,7 +14,7 @@
 
 Zsh execution tool for Claude Code with full Bash parity, yield-based oversight, PTY mode, NEVERHANG circuit breaker, and A.L.A.N. short-term learning.
 
-**Status:** Beta (v0.2.0-beta.1)
+**Status:** Beta (v0.3.0)
 
 **Author:** Claude + Meldrey
 
@@ -39,8 +39,9 @@ zsh-tool is **intelligent shell execution**:
 | Commands hang forever | **Yield-based execution** — always get control back |
 | No visibility into running commands | **zsh_poll** — incremental output collection |
 | Can't interact with prompts | **PTY mode** + **zsh_send** — full interactive support |
+| Can't type passwords | **PTY mode** — let Claude Code type its own passwords |
 | Timeouts cascade | **NEVERHANG circuit breaker** — fail fast, auto-recover |
-| No memory between calls | **A.L.A.N.** — learns patterns, warns about risky commands |
+| No memory between calls | **A.L.A.N. 2.0** — retry detection, streak tracking, proactive insights |
 | No task management | **zsh_tasks**, **zsh_kill** — full control |
 
 This is the difference between "run commands" and "intelligent shell integration."
@@ -75,12 +76,15 @@ Prevents hanging commands from blocking sessions:
 - Auto-recovers after 5 minutes
 - States: `CLOSED` (normal) → `OPEN` (blocking) → `HALF_OPEN` (testing)
 
-### A.L.A.N. (As Long As Necessary)
-Short-term learning database with temporal decay:
-- Records command patterns, exit codes, durations
-- Warns about commands that historically timeout
-- Exponential decay (half-life: 24 hours)
-- Auto-prunes entries below 1% weight
+### A.L.A.N. 2.0 (As Long As Necessary)
+Intelligent short-term learning — *"Maybe you're fuckin' up, maybe you're doing it right."*
+
+- **Retry Detection** — warns when you're repeating failed commands
+- **Streak Tracking** — celebrates success streaks, warns on failure streaks
+- **Fuzzy Matching** — `git push origin feature-1` → `git push origin *`
+- **Proactive Insights** — contextual feedback before you run commands
+- **Session Memory** — 15-minute rolling window tracks recent activity
+- **Temporal Decay** — exponential decay (24h half-life), auto-prunes
 
 ---
 
@@ -175,8 +179,17 @@ To use zsh as the only shell, add to `~/.claude/settings.json`:
 
 ## Changelog
 
-### 0.2.0-beta.1
-- Yield-based execution with live oversight (Issue #1)
+### 0.3.0
+**A.L.A.N. 2.0** — *"Maybe you're fuckin' up, maybe you're doing it right."*
+- Retry detection: warns when repeating failed commands
+- Streak tracking: celebrates success, warns on failure
+- Fuzzy template matching: similar commands grouped
+- Proactive insights: contextual feedback before execution
+- Session memory: 15-minute rolling window
+- New database tables: `recent_commands`, `streaks`
+
+### 0.2.0
+- Yield-based execution with live oversight
 - PTY mode for full terminal emulation
 - Interactive input support via `zsh_send`
 - Task management: `zsh_poll`, `zsh_kill`, `zsh_tasks`
