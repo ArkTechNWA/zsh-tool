@@ -36,7 +36,7 @@ from mcp.types import Tool, TextContent
 # =============================================================================
 
 ALAN_DB_PATH = Path(os.environ.get("ALAN_DB_PATH", "~/.claude/plugins/zsh-tool/data/alan.db")).expanduser()
-NEVERHANG_TIMEOUT_DEFAULT = int(os.environ.get("NEVERHANG_TIMEOUT_DEFAULT", 120))
+NEVERHANG_TIMEOUT_DEFAULT = int(os.environ.get("NEVERHANG_TIMEOUT_DEFAULT", 3600))  # 1 hour - effectively never auto-kills
 NEVERHANG_TIMEOUT_MAX = int(os.environ.get("NEVERHANG_TIMEOUT_MAX", 600))
 TRUNCATE_OUTPUT_AT = 30000  # Match Bash tool behavior
 
@@ -312,7 +312,7 @@ circuit_breaker = CircuitBreaker()
 # Live Task Manager (Issue #1: Yield-based execution with oversight)
 # =============================================================================
 
-YIELD_AFTER_DEFAULT = 7.0  # Seconds before yielding control back
+YIELD_AFTER_DEFAULT = 2.0  # Seconds before yielding control back (MCP call returns)
 
 @dataclass
 class LiveTask:
@@ -554,16 +554,8 @@ async def execute_zsh_pty(
     # Start background output collector
     asyncio.create_task(_pty_output_collector(task))
 
-    # Wait for yield_after seconds or completion
-    # Shield against MCP abort - always return gracefully
-    try:
-        await asyncio.wait_for(
-            asyncio.shield(asyncio.sleep(min(yield_after, timeout))),
-            timeout=min(yield_after, timeout) + 1.0  # Slight buffer
-        )
-    except (asyncio.CancelledError, asyncio.TimeoutError):
-        # MCP aborted or timed out - still return what we have
-        warnings.append("MCP call interrupted - returning partial result")
+    # Wait for yield_after seconds then return (process continues in background)
+    await asyncio.sleep(yield_after)
 
     # Check status and return
     return _build_task_response(task, warnings)
@@ -625,16 +617,8 @@ async def execute_zsh_yielding(
     # Start background output collector
     asyncio.create_task(_output_collector(task))
 
-    # Wait for yield_after seconds or completion
-    # Shield against MCP abort - always return gracefully
-    try:
-        await asyncio.wait_for(
-            asyncio.shield(asyncio.sleep(min(yield_after, timeout))),
-            timeout=min(yield_after, timeout) + 1.0  # Slight buffer
-        )
-    except (asyncio.CancelledError, asyncio.TimeoutError):
-        # MCP aborted or timed out - still return what we have
-        warnings.append("MCP call interrupted - returning partial result")
+    # Wait for yield_after seconds then return (process continues in background)
+    await asyncio.sleep(yield_after)
 
     # Check status and return
     return _build_task_response(task, warnings)
@@ -737,14 +721,18 @@ async def kill_task(task_id: str) -> dict:
         if task.is_pty:
             # Kill PTY process by PID
             os.kill(task.process, 9)  # SIGKILL
-            # Wait for process to be reaped
+            # Non-blocking reap - don't wait for zombie
             try:
-                os.waitpid(task.process, 0)
+                os.waitpid(task.process, os.WNOHANG)
             except ChildProcessError:
                 pass
         else:
             task.process.kill()
-            await task.process.wait()
+            # Don't block forever waiting for process to die
+            try:
+                await asyncio.wait_for(task.process.wait(), timeout=2.0)
+            except asyncio.TimeoutError:
+                pass  # Process didn't die cleanly, but we tried
 
         task.status = "killed"
         _cleanup_task(task_id)
