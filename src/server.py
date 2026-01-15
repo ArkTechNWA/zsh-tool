@@ -744,7 +744,7 @@ async def _output_collector(task: LiveTask):
         duration_ms = int((time.time() - task.started_at) * 1000)
         alan.record(
             task.command,
-            task.exit_code or -1,
+            task.exit_code if task.exit_code is not None else -1,
             duration_ms,
             task.status == "timeout",
             task.output_buffer[:500],
@@ -821,7 +821,7 @@ async def _pty_output_collector(task: LiveTask):
         duration_ms = int((time.time() - task.started_at) * 1000)
         alan.record(
             task.command,
-            task.exit_code or -1,
+            task.exit_code if task.exit_code is not None else -1,
             duration_ms,
             task.status == "timeout",
             task.output_buffer[:500],
