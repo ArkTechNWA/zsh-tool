@@ -78,12 +78,12 @@ class ALAN:
 
     def _init_db(self):
         with self._connect() as conn:
+            # Create tables
             conn.executescript("""
                 -- Original observations table (pattern learning)
                 CREATE TABLE IF NOT EXISTS observations (
                     id TEXT PRIMARY KEY,
                     command_hash TEXT NOT NULL,
-                    command_template TEXT,
                     command_preview TEXT,
                     exit_code INTEGER,
                     duration_ms INTEGER,
@@ -96,7 +96,6 @@ class ALAN:
                 );
 
                 CREATE INDEX IF NOT EXISTS idx_command_hash ON observations(command_hash);
-                CREATE INDEX IF NOT EXISTS idx_command_template ON observations(command_template);
                 CREATE INDEX IF NOT EXISTS idx_created_at ON observations(created_at);
                 CREATE INDEX IF NOT EXISTS idx_weight ON observations(weight);
 
@@ -134,6 +133,17 @@ class ALAN:
                     value TEXT
                 );
             """)
+
+            # A.L.A.N. 2.0 migrations - add columns if missing
+            self._migrate_add_column(conn, 'observations', 'command_template', 'TEXT')
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_command_template ON observations(command_template)")
+
+    def _migrate_add_column(self, conn, table: str, column: str, col_type: str):
+        """Add column to table if it doesn't exist (SQLite migration helper)."""
+        cursor = conn.execute(f"PRAGMA table_info({table})")
+        columns = [row[1] for row in cursor.fetchall()]
+        if column not in columns:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {col_type}")
 
     @contextmanager
     def _connect(self):
