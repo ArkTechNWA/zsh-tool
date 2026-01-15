@@ -311,13 +311,12 @@ YIELD_AFTER_DEFAULT = 7.0  # Seconds before yielding control back
 
 @dataclass
 class LiveTask:
-    """A running command with live output buffering and stdin pipe."""
+    """A running command with live output buffering."""
     task_id: str
     command: str
     process: Any  # asyncio.subprocess.Process
     started_at: float
     timeout: int
-    stdin_pipe: Optional[str] = None  # Path to named pipe for stdin
     output_buffer: str = ""
     output_read_pos: int = 0  # How much output has been returned to caller
     status: str = "running"  # running, completed, timeout, killed, error
@@ -329,26 +328,15 @@ class LiveTask:
 live_tasks: dict[str, LiveTask] = {}
 
 
-def _create_stdin_pipe(task_id: str) -> str:
-    """Create a named pipe for sending input to a running command."""
-    pipe_path = f"/tmp/zsh-tool-stdin-{task_id}"
-    try:
-        if os.path.exists(pipe_path):
-            os.unlink(pipe_path)
-        os.mkfifo(pipe_path)
-    except OSError:
-        pass  # May fail if already exists as regular file
-    return pipe_path
-
-
 def _cleanup_task(task_id: str):
     """Clean up task resources."""
+    # Close stdin if still open
     if task_id in live_tasks:
         task = live_tasks[task_id]
-        if task.stdin_pipe and os.path.exists(task.stdin_pipe):
+        if task.process.stdin and not task.process.stdin.is_closing():
             try:
-                os.unlink(task.stdin_pipe)
-            except OSError:
+                task.process.stdin.close()
+            except Exception:
                 pass
 
 
@@ -438,38 +426,22 @@ async def execute_zsh_yielding(
 
     # Create task
     task_id = str(uuid.uuid4())[:8]
-    stdin_pipe = _create_stdin_pipe(task_id)
 
-    # Start process with stdin from pipe (or /dev/null if pipe fails)
-    try:
-        # Open stdin pipe for reading (non-blocking)
-        stdin_fd = os.open(stdin_pipe, os.O_RDONLY | os.O_NONBLOCK)
-        proc = await asyncio.create_subprocess_shell(
-            command,
-            stdin=stdin_fd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT,  # Merge stderr into stdout
-            executable='/bin/zsh'
-        )
-        os.close(stdin_fd)
-    except OSError:
-        # Fallback: no stdin pipe
-        proc = await asyncio.create_subprocess_shell(
-            command,
-            stdin=asyncio.subprocess.DEVNULL,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT,
-            executable='/bin/zsh'
-        )
-        stdin_pipe = None
+    # Start process with stdin pipe for interactive input
+    proc = await asyncio.create_subprocess_shell(
+        command,
+        stdin=asyncio.subprocess.PIPE,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.STDOUT,  # Merge stderr into stdout
+        executable='/bin/zsh'
+    )
 
     task = LiveTask(
         task_id=task_id,
         command=command,
         process=proc,
         started_at=time.time(),
-        timeout=timeout,
-        stdin_pipe=stdin_pipe
+        timeout=timeout
     )
     live_tasks[task_id] = task
 
@@ -503,7 +475,7 @@ def _build_task_response(task: LiveTask, warnings: list = None) -> dict:
     }
 
     if task.status == "running":
-        result['stdin_pipe'] = task.stdin_pipe
+        result['has_stdin'] = task.process.stdin is not None
         result['message'] = f"Command running ({elapsed:.1f}s). Use zsh_poll to get more output, zsh_send to send input."
     elif task.status == "completed":
         result['success'] = task.exit_code == 0
@@ -538,7 +510,7 @@ async def poll_task(task_id: str) -> dict:
 
 
 async def send_to_task(task_id: str, input_text: str) -> dict:
-    """Send input to a task's stdin pipe."""
+    """Send input to a task's stdin."""
     if task_id not in live_tasks:
         return {'error': f'Unknown task: {task_id}', 'success': False}
 
@@ -547,15 +519,14 @@ async def send_to_task(task_id: str, input_text: str) -> dict:
     if task.status != "running":
         return {'error': f'Task not running (status: {task.status})', 'success': False}
 
-    if not task.stdin_pipe:
-        return {'error': 'No stdin pipe available for this task', 'success': False}
+    if not task.process.stdin:
+        return {'error': 'No stdin available for this task', 'success': False}
 
     try:
-        # Write to the named pipe
-        with open(task.stdin_pipe, 'w') as f:
-            f.write(input_text)
-            if not input_text.endswith('\n'):
-                f.write('\n')
+        # Write to process stdin
+        data = input_text if input_text.endswith('\n') else input_text + '\n'
+        task.process.stdin.write(data.encode('utf-8'))
+        await task.process.stdin.drain()
         return {'success': True, 'message': f'Sent {len(input_text)} chars to task {task_id}'}
     except Exception as e:
         return {'error': f'Failed to send input: {e}', 'success': False}
@@ -789,8 +760,8 @@ def _format_task_output(result: dict) -> list[TextContent]:
     elapsed = result.get('elapsed_seconds', 0)
 
     if status == "running":
-        stdin_pipe = result.get('stdin_pipe', '')
-        parts.append(f"[RUNNING task_id={task_id} elapsed={elapsed}s stdin_pipe={stdin_pipe}]")
+        has_stdin = result.get('has_stdin', False)
+        parts.append(f"[RUNNING task_id={task_id} elapsed={elapsed}s stdin={'yes' if has_stdin else 'no'}]")
         parts.append("Use zsh_poll to continue, zsh_send to input, zsh_kill to stop.")
     elif status == "completed":
         exit_code = result.get('exit_code', 0)
