@@ -53,23 +53,37 @@ NEVERHANG_SAMPLE_WINDOW = 3600    # Only count failures in last hour
 
 
 # =============================================================================
-# A.L.A.N. - As Long As Necessary
+# A.L.A.N. 2.0 - As Long As Necessary
+# "Maybe you're fuckin' up, maybe you're doing it right."
 # =============================================================================
 
+# A.L.A.N. 2.0 settings
+ALAN_RECENT_WINDOW_SIZE = 50      # Track last N commands
+ALAN_RECENT_WINDOW_MINUTES = 10   # For retry detection
+ALAN_STREAK_THRESHOLD = 3         # Min streak to report
+
 class ALAN:
-    """Short-term learning database with temporal decay."""
+    """
+    Short-term learning database with temporal decay, retry detection,
+    streak tracking, and proactive insights.
+
+    A.L.A.N. 2.0: Now with personality.
+    """
 
     def __init__(self, db_path: Path):
         self.db_path = db_path
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        self.session_id = str(uuid.uuid4())[:8]  # Unique per server instance
         self._init_db()
 
     def _init_db(self):
         with self._connect() as conn:
             conn.executescript("""
+                -- Original observations table (pattern learning)
                 CREATE TABLE IF NOT EXISTS observations (
                     id TEXT PRIMARY KEY,
                     command_hash TEXT NOT NULL,
+                    command_template TEXT,
                     command_preview TEXT,
                     exit_code INTEGER,
                     duration_ms INTEGER,
@@ -82,9 +96,39 @@ class ALAN:
                 );
 
                 CREATE INDEX IF NOT EXISTS idx_command_hash ON observations(command_hash);
+                CREATE INDEX IF NOT EXISTS idx_command_template ON observations(command_template);
                 CREATE INDEX IF NOT EXISTS idx_created_at ON observations(created_at);
                 CREATE INDEX IF NOT EXISTS idx_weight ON observations(weight);
 
+                -- Recent commands (hot cache for retry/streak detection)
+                CREATE TABLE IF NOT EXISTS recent_commands (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    session_id TEXT NOT NULL,
+                    command_hash TEXT NOT NULL,
+                    command_template TEXT,
+                    command_preview TEXT,
+                    timestamp REAL NOT NULL,
+                    duration_ms INTEGER,
+                    exit_code INTEGER,
+                    timed_out INTEGER DEFAULT 0,
+                    success INTEGER DEFAULT 1
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_recent_session ON recent_commands(session_id, timestamp DESC);
+                CREATE INDEX IF NOT EXISTS idx_recent_hash ON recent_commands(command_hash, timestamp DESC);
+                CREATE INDEX IF NOT EXISTS idx_recent_template ON recent_commands(command_template, timestamp DESC);
+
+                -- Streak tracking per pattern
+                CREATE TABLE IF NOT EXISTS streaks (
+                    command_hash TEXT PRIMARY KEY,
+                    current_streak INTEGER DEFAULT 0,
+                    longest_success_streak INTEGER DEFAULT 0,
+                    longest_fail_streak INTEGER DEFAULT 0,
+                    last_result INTEGER,
+                    last_updated REAL
+                );
+
+                -- Metadata
                 CREATE TABLE IF NOT EXISTS meta (
                     key TEXT PRIMARY KEY,
                     value TEXT
@@ -102,29 +146,75 @@ class ALAN:
             conn.close()
 
     def _hash_command(self, command: str) -> str:
-        """Create a hash for command pattern matching."""
-        # Normalize: collapse whitespace, remove specific paths/values
+        """Create an exact hash for command pattern matching."""
         normalized = re.sub(r'\s+', ' ', command.strip())
-        # Remove quoted strings (they're often variable)
         normalized = re.sub(r'"[^"]*"', '""', normalized)
         normalized = re.sub(r"'[^']*'", "''", normalized)
-        # Remove numbers (often variable)
         normalized = re.sub(r'\b\d+\b', 'N', normalized)
         return hashlib.sha256(normalized.encode()).hexdigest()[:16]
+
+    def _template_command(self, command: str) -> str:
+        """
+        Create a fuzzy template for similarity matching.
+        'git push origin feature-1' -> 'git push origin *'
+        """
+        normalized = re.sub(r'\s+', ' ', command.strip())
+        parts = normalized.split()
+        if not parts:
+            return ""
+
+        # Keep first 1-3 tokens as-is (the command), replace rest with wildcards
+        # Heuristic: common commands have 1-2 word base
+        base_commands = {
+            'git', 'npm', 'yarn', 'pip', 'docker', 'kubectl', 'make',
+            'cargo', 'go', 'python', 'node', 'ruby', 'curl', 'wget',
+            'cat', 'grep', 'find', 'ls', 'cd', 'rm', 'cp', 'mv', 'mkdir',
+            'systemctl', 'journalctl', 'apt', 'pacman', 'brew'
+        }
+
+        template_parts = []
+        found_base = False
+        for i, part in enumerate(parts):
+            if not found_base:
+                template_parts.append(part)
+                # Check if this or next is a subcommand
+                if part.lower() in base_commands:
+                    # Include next part if it looks like subcommand
+                    if i + 1 < len(parts) and not parts[i+1].startswith('-'):
+                        continue
+                    found_base = True
+                elif i >= 1:  # After 2 parts, assume we have base
+                    found_base = True
+            else:
+                # Replace arguments with wildcards, keep flags
+                if part.startswith('-'):
+                    template_parts.append(part)
+                else:
+                    if template_parts[-1] != '*':
+                        template_parts.append('*')
+
+        return ' '.join(template_parts)
 
     def record(self, command: str, exit_code: int, duration_ms: int,
                timed_out: bool = False, stdout: str = "", stderr: str = ""):
         """Record a command execution for learning."""
+        command_hash = self._hash_command(command)
+        command_template = self._template_command(command)
+        success = 1 if (exit_code == 0 and not timed_out) else 0
+        now = time.time()
+
         with self._connect() as conn:
+            # Record in observations (long-term learning)
             conn.execute("""
                 INSERT INTO observations
-                (id, command_hash, command_preview, exit_code, duration_ms,
-                 timed_out, output_snippet, error_snippet, weight, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1.0, ?)
+                (id, command_hash, command_template, command_preview, exit_code,
+                 duration_ms, timed_out, output_snippet, error_snippet, weight, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1.0, ?)
             """, (
                 str(uuid.uuid4()),
-                self._hash_command(command),
-                command[:200],  # Preview only
+                command_hash,
+                command_template,
+                command[:200],
                 exit_code,
                 duration_ms,
                 1 if timed_out else 0,
@@ -133,11 +223,136 @@ class ALAN:
                 datetime.utcnow().isoformat()
             ))
 
-    def get_pattern_stats(self, command: str) -> dict:
-        """Get statistics for a command pattern."""
+            # Record in recent_commands (hot cache)
+            conn.execute("""
+                INSERT INTO recent_commands
+                (session_id, command_hash, command_template, command_preview,
+                 timestamp, duration_ms, exit_code, timed_out, success)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                self.session_id,
+                command_hash,
+                command_template,
+                command[:200],
+                now,
+                duration_ms,
+                exit_code,
+                1 if timed_out else 0,
+                success
+            ))
+
+            # Update streak
+            self._update_streak(conn, command_hash, success, now)
+
+            # Prune old recent commands
+            cutoff = now - (ALAN_RECENT_WINDOW_MINUTES * 60 * 10)  # Keep 10x window
+            conn.execute("DELETE FROM recent_commands WHERE timestamp < ?", (cutoff,))
+
+    def _update_streak(self, conn, command_hash: str, success: int, now: float):
+        """Update streak tracking for a command pattern."""
+        row = conn.execute(
+            "SELECT current_streak, longest_success_streak, longest_fail_streak, last_result FROM streaks WHERE command_hash = ?",
+            (command_hash,)
+        ).fetchone()
+
+        if row:
+            current = row['current_streak']
+            longest_success = row['longest_success_streak']
+            longest_fail = row['longest_fail_streak']
+            last_result = row['last_result']
+
+            if success == last_result:
+                # Continue streak
+                if success:
+                    current += 1
+                    longest_success = max(longest_success, current)
+                else:
+                    current -= 1
+                    longest_fail = max(longest_fail, abs(current))
+            else:
+                # Streak broken, start new
+                current = 1 if success else -1
+
+            conn.execute("""
+                UPDATE streaks
+                SET current_streak = ?, longest_success_streak = ?, longest_fail_streak = ?,
+                    last_result = ?, last_updated = ?
+                WHERE command_hash = ?
+            """, (current, longest_success, longest_fail, success, now, command_hash))
+        else:
+            conn.execute("""
+                INSERT INTO streaks (command_hash, current_streak, longest_success_streak,
+                                    longest_fail_streak, last_result, last_updated)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (command_hash, 1 if success else -1, 1 if success else 0, 0 if success else 1, success, now))
+
+    def get_recent_activity(self, command: str) -> dict:
+        """Get recent activity for retry detection."""
         command_hash = self._hash_command(command)
+        command_template = self._template_command(command)
+        now = time.time()
+        window_start = now - (ALAN_RECENT_WINDOW_MINUTES * 60)
+
         with self._connect() as conn:
-            # Apply decay before querying
+            # Exact match retries
+            exact_rows = conn.execute("""
+                SELECT success, timestamp, duration_ms
+                FROM recent_commands
+                WHERE command_hash = ? AND timestamp > ?
+                ORDER BY timestamp DESC
+            """, (command_hash, window_start)).fetchall()
+
+            # Similar (template) matches
+            similar_rows = conn.execute("""
+                SELECT command_preview, success, timestamp
+                FROM recent_commands
+                WHERE command_template = ? AND command_hash != ? AND timestamp > ?
+                ORDER BY timestamp DESC
+                LIMIT 5
+            """, (command_template, command_hash, window_start)).fetchall()
+
+            exact_count = len(exact_rows)
+            exact_successes = sum(1 for r in exact_rows if r['success'])
+            exact_failures = exact_count - exact_successes
+
+            return {
+                'is_retry': exact_count > 0,
+                'retry_count': exact_count,
+                'recent_successes': exact_successes,
+                'recent_failures': exact_failures,
+                'similar_commands': [
+                    {'preview': r['command_preview'][:50], 'success': bool(r['success'])}
+                    for r in similar_rows
+                ],
+                'template': command_template
+            }
+
+    def get_streak(self, command: str) -> dict:
+        """Get streak info for a command pattern."""
+        command_hash = self._hash_command(command)
+
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM streaks WHERE command_hash = ?",
+                (command_hash,)
+            ).fetchone()
+
+            if not row:
+                return {'has_streak': False, 'current': 0}
+
+            return {
+                'has_streak': True,
+                'current': row['current_streak'],
+                'longest_success': row['longest_success_streak'],
+                'longest_fail': row['longest_fail_streak'],
+                'last_was_success': bool(row['last_result'])
+            }
+
+    def get_pattern_stats(self, command: str) -> dict:
+        """Get comprehensive statistics for a command pattern."""
+        command_hash = self._hash_command(command)
+
+        with self._connect() as conn:
             self._apply_decay(conn)
 
             row = conn.execute("""
@@ -153,21 +368,146 @@ class ALAN:
             """, (command_hash,)).fetchone()
 
             if not row or row['total'] == 0:
-                return {'known': False}
+                base = {'known': False}
+            else:
+                base = {
+                    'known': True,
+                    'observations': row['total'],
+                    'weighted_total': row['weighted_total'] or 0,
+                    'timeout_rate': (row['timeout_weight'] or 0) / (row['weighted_total'] or 1),
+                    'success_rate': (row['success_weight'] or 0) / (row['weighted_total'] or 1),
+                    'avg_duration_ms': row['avg_duration'],
+                    'max_duration_ms': row['max_duration']
+                }
+
+        # Add recent activity and streak info
+        base['recent'] = self.get_recent_activity(command)
+        base['streak'] = self.get_streak(command)
+
+        return base
+
+    def get_insights(self, command: str, timeout: int = 120) -> list:
+        """
+        Generate proactive insights for a command.
+        Returns list of insight messages to show the user.
+        """
+        insights = []
+        stats = self.get_pattern_stats(command)
+        recent = stats.get('recent', {})
+        streak = stats.get('streak', {})
+
+        # Retry detection
+        if recent.get('is_retry'):
+            count = recent['retry_count']
+            successes = recent['recent_successes']
+            failures = recent['recent_failures']
+
+            if count >= 1:
+                if failures > 0 and successes == 0:
+                    insights.append(f"Retry #{count + 1}. Previous {failures} all failed. Different approach?")
+                elif successes > 0 and failures == 0:
+                    insights.append(f"Retry #{count + 1}. Previous {successes} succeeded.")
+                else:
+                    insights.append(f"Retry #{count + 1} in last {ALAN_RECENT_WINDOW_MINUTES}m. {successes}/{count} succeeded.")
+
+        # Similar commands
+        if recent.get('similar_commands') and not recent.get('is_retry'):
+            similar = recent['similar_commands']
+            if similar:
+                sim_success = sum(1 for s in similar if s['success'])
+                template = recent.get('template', 'similar pattern')
+                insights.append(f"Similar to '{template}' - {sim_success}/{len(similar)} succeeded recently.")
+
+        # Streak info
+        if streak.get('has_streak'):
+            current = streak['current']
+            if current >= ALAN_STREAK_THRESHOLD:
+                insights.append(f"Streak: {current} successes in a row. Solid.")
+            elif current <= -ALAN_STREAK_THRESHOLD:
+                insights.append(f"Failing streak: {abs(current)}. Same approach?")
+
+        # Pattern history warnings
+        if stats.get('known'):
+            if stats['timeout_rate'] > 0.5:
+                insights.append(f"{stats['timeout_rate']*100:.0f}% timeout rate for this pattern.")
+            elif stats['success_rate'] > 0.9 and stats['observations'] >= 5:
+                insights.append(f"Reliable pattern: {stats['success_rate']*100:.0f}% success ({stats['observations']} runs).")
+
+            if stats.get('avg_duration_ms'):
+                avg_sec = stats['avg_duration_ms'] / 1000
+                if avg_sec > 10:
+                    insights.append(f"Usually takes ~{avg_sec:.0f}s.")
+        else:
+            insights.append("New pattern. No history yet.")
+
+        return insights
+
+    def get_session_stats(self) -> dict:
+        """Get statistics for the current session."""
+        with self._connect() as conn:
+            row = conn.execute("""
+                SELECT
+                    COUNT(*) as total,
+                    SUM(success) as successes,
+                    SUM(timed_out) as timeouts,
+                    AVG(duration_ms) as avg_duration
+                FROM recent_commands
+                WHERE session_id = ?
+            """, (self.session_id,)).fetchone()
+
+            total = row['total'] or 0
+            successes = row['successes'] or 0
+
+            # Count retries (same hash appearing multiple times)
+            retry_row = conn.execute("""
+                SELECT COUNT(*) as retries FROM (
+                    SELECT command_hash, COUNT(*) as cnt
+                    FROM recent_commands
+                    WHERE session_id = ?
+                    GROUP BY command_hash
+                    HAVING cnt > 1
+                )
+            """, (self.session_id,)).fetchone()
 
             return {
-                'known': True,
-                'observations': row['total'],
-                'weighted_total': row['weighted_total'] or 0,
-                'timeout_rate': (row['timeout_weight'] or 0) / (row['weighted_total'] or 1),
-                'success_rate': (row['success_weight'] or 0) / (row['weighted_total'] or 1),
-                'avg_duration_ms': row['avg_duration'],
-                'max_duration_ms': row['max_duration']
+                'session_id': self.session_id,
+                'total_commands': total,
+                'successes': successes,
+                'failures': total - successes,
+                'success_rate': successes / total if total > 0 else 0,
+                'timeouts': row['timeouts'] or 0,
+                'retries': retry_row['retries'] or 0,
+                'avg_duration_ms': row['avg_duration']
             }
+
+    def get_hot_patterns(self, limit: int = 10) -> list:
+        """Get most frequently used patterns in recent window."""
+        with self._connect() as conn:
+            rows = conn.execute("""
+                SELECT
+                    command_template,
+                    COUNT(*) as count,
+                    SUM(success) as successes,
+                    AVG(duration_ms) as avg_duration
+                FROM recent_commands
+                WHERE session_id = ?
+                GROUP BY command_template
+                ORDER BY count DESC
+                LIMIT ?
+            """, (self.session_id, limit)).fetchall()
+
+            return [
+                {
+                    'pattern': row['command_template'],
+                    'count': row['count'],
+                    'success_rate': row['successes'] / row['count'] if row['count'] > 0 else 0,
+                    'avg_duration_ms': row['avg_duration']
+                }
+                for row in rows
+            ]
 
     def _apply_decay(self, conn):
         """Apply temporal decay to all weights."""
-        # Calculate decay factor: weight = initial * (0.5 ^ (hours / half_life))
         conn.execute("""
             UPDATE observations
             SET weight = weight * POWER(0.5,
@@ -180,39 +520,25 @@ class ALAN:
         """Remove decayed entries and enforce limits."""
         with self._connect() as conn:
             self._apply_decay(conn)
-
-            # Remove entries below threshold
-            conn.execute("DELETE FROM observations WHERE weight < ?",
-                        (ALAN_PRUNE_THRESHOLD,))
-
-            # Enforce max entries (keep highest weight)
+            conn.execute("DELETE FROM observations WHERE weight < ?", (ALAN_PRUNE_THRESHOLD,))
             conn.execute("""
                 DELETE FROM observations
                 WHERE id NOT IN (
-                    SELECT id FROM observations
-                    ORDER BY weight DESC
-                    LIMIT ?
+                    SELECT id FROM observations ORDER BY weight DESC LIMIT ?
                 )
             """, (ALAN_MAX_ENTRIES,))
-
-            # Update last prune time
             conn.execute("""
-                INSERT OR REPLACE INTO meta (key, value)
-                VALUES ('last_prune', ?)
+                INSERT OR REPLACE INTO meta (key, value) VALUES ('last_prune', ?)
             """, (datetime.utcnow().isoformat(),))
 
     def maybe_prune(self):
         """Prune if enough time has passed."""
         with self._connect() as conn:
-            row = conn.execute(
-                "SELECT value FROM meta WHERE key = 'last_prune'"
-            ).fetchone()
-
+            row = conn.execute("SELECT value FROM meta WHERE key = 'last_prune'").fetchone()
             if row:
                 last_prune = datetime.fromisoformat(row['value'])
                 if datetime.utcnow() - last_prune < timedelta(hours=ALAN_PRUNE_INTERVAL_HOURS):
                     return
-
         self.prune()
 
     def get_stats(self) -> dict:
@@ -228,13 +554,19 @@ class ALAN:
                 FROM observations
             """).fetchone()
 
-            return {
+            base = {
                 'total_observations': row['total_observations'],
                 'unique_patterns': row['unique_patterns'],
                 'total_weight': row['total_weight'] or 0,
                 'oldest': row['oldest'],
                 'newest': row['newest']
             }
+
+        # Add session and hot patterns
+        base['session'] = self.get_session_stats()
+        base['hot_patterns'] = self.get_hot_patterns(5)
+
+        return base
 
 
 # =============================================================================
@@ -503,15 +835,9 @@ async def execute_zsh_pty(
     # Validate timeout
     timeout = min(timeout, NEVERHANG_TIMEOUT_MAX)
 
-    # Check A.L.A.N. for pattern insights
-    pattern_stats = alan.get_pattern_stats(command)
-    warnings = []
-
-    if pattern_stats.get('known'):
-        if pattern_stats['timeout_rate'] > 0.5:
-            warnings.append(f"A.L.A.N.: {pattern_stats['timeout_rate']*100:.0f}% timeout rate for this pattern")
-        if pattern_stats.get('max_duration_ms', 0) > timeout * 1000 * 0.8:
-            warnings.append(f"A.L.A.N.: Similar commands took up to {pattern_stats['max_duration_ms']/1000:.1f}s")
+    # Check A.L.A.N. 2.0 for insights
+    insights = alan.get_insights(command, timeout)
+    warnings = [f"A.L.A.N.: {i}" for i in insights]
 
     # Check NEVERHANG circuit breaker
     allowed, circuit_message = circuit_breaker.should_allow()
@@ -579,15 +905,9 @@ async def execute_zsh_yielding(
     # Validate timeout
     timeout = min(timeout, NEVERHANG_TIMEOUT_MAX)
 
-    # Check A.L.A.N. for pattern insights
-    pattern_stats = alan.get_pattern_stats(command)
-    warnings = []
-
-    if pattern_stats.get('known'):
-        if pattern_stats['timeout_rate'] > 0.5:
-            warnings.append(f"A.L.A.N.: {pattern_stats['timeout_rate']*100:.0f}% timeout rate for this pattern")
-        if pattern_stats.get('max_duration_ms', 0) > timeout * 1000 * 0.8:
-            warnings.append(f"A.L.A.N.: Similar commands took up to {pattern_stats['max_duration_ms']/1000:.1f}s")
+    # Check A.L.A.N. 2.0 for insights
+    insights = alan.get_insights(command, timeout)
+    warnings = [f"A.L.A.N.: {i}" for i in insights]
 
     # Check NEVERHANG circuit breaker
     allowed, circuit_message = circuit_breaker.should_allow()
@@ -1023,5 +1343,10 @@ async def main():
         print(f"zsh-tool: unexpected error: {eg}", file=sys.stderr)
 
 
-if __name__ == '__main__':
+def run():
+    """Entry point for CLI."""
     asyncio.run(main())
+
+
+if __name__ == '__main__':
+    run()
