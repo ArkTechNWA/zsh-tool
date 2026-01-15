@@ -1,0 +1,54 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200">
+  <defs>
+    <linearGradient id="zGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#ff3333"/>
+      <stop offset="50%" style="stop-color:#cc0000"/>
+      <stop offset="100%" style="stop-color:#990000"/>
+    </linearGradient>
+    <filter id="pixelate">
+      <feFlood x="4" y="4" height="2" width="2"/>
+      <feComposite width="8" height="8"/>
+      <feTile result="a"/>
+      <feComposite in="SourceGraphic" in2="a" operator="in"/>
+      <feMorphology operator="dilate" radius="4"/>
+    </filter>
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="3" result="coloredBlur"/>
+      <feMerge>
+        <feMergeNode in="coloredBlur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- Background -->
+  <rect width="200" height="200" fill="#1a1a2e" rx="20"/>
+
+  <!-- 8-bit Z character - pixel grid style -->
+  <g filter="url(#glow)">
+    <!-- Top bar of Z -->
+    <rect x="35" y="30" width="130" height="16" fill="url(#zGradient)"/>
+    <rect x="35" y="30" width="16" height="16" fill="#ff6666"/>
+
+    <!-- Diagonal of Z - stepped pixels -->
+    <rect x="133" y="46" width="16" height="16" fill="url(#zGradient)"/>
+    <rect x="117" y="62" width="16" height="16" fill="url(#zGradient)"/>
+    <rect x="101" y="78" width="16" height="16" fill="url(#zGradient)"/>
+    <rect x="85" y="94" width="16" height="16" fill="url(#zGradient)"/>
+    <rect x="69" y="110" width="16" height="16" fill="url(#zGradient)"/>
+    <rect x="53" y="126" width="16" height="16" fill="url(#zGradient)"/>
+
+    <!-- Bottom bar of Z -->
+    <rect x="35" y="142" width="130" height="16" fill="url(#zGradient)"/>
+    <rect x="149" y="142" width="16" height="16" fill="#ff6666"/>
+  </g>
+
+  <!-- TOOL text -->
+  <text x="100" y="185"
+        font-family="'Courier New', monospace"
+        font-size="20"
+        font-weight="bold"
+        fill="#666666"
+        text-anchor="middle"
+        letter-spacing="4">TOOL</text>
+</svg>

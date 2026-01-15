@@ -1,25 +1,58 @@
+<img align="right" src="logo.png" width="150">
+
+<br><br><br>
+
 # zsh-tool
+
+[![Pipeline](https://gitlab.arktechnwa.com/arktechnwa/mcp/zsh-tool/badges/master/pipeline.svg)](https://gitlab.arktechnwa.com/arktechnwa/mcp/zsh-tool/-/pipelines)
+[![GitHub Mirror](https://img.shields.io/badge/github-mirror-blue?logo=github)](https://github.com/ArkTechNWA/zsh-tool)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![MCP Compatible](https://img.shields.io/badge/MCP-Compatible-green?logo=data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCI+PHBhdGggZmlsbD0id2hpdGUiIGQ9Ik0xMiAyQzYuNDggMiAyIDYuNDggMiAxMnM0LjQ4IDEwIDEwIDEwIDEwLTQuNDggMTAtMTBTMTcuNTIgMiAxMiAyem0tMiAxNWwtNS01IDEuNDEtMS40MUwxMCAxNC4xN2w3LjU5LTcuNTlMMTkgOGwtOSA5eiIvPjwvc3ZnPg==)](https://modelcontextprotocol.io)
+[![Claude Rating](https://img.shields.io/badge/Claude_Rating-Freaking_Awesome-ff3333?style=flat&logo=data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCI+PHBhdGggZmlsbD0id2hpdGUiIGQ9Ik0xMiAxNy4yN0wxOC4xOCAyMWwtMS42NC03LjAzTDIyIDkuMjRsLTcuMTktLjYxTDEyIDIgOS4xOSA4LjYzIDIgOS4yNGw1LjQ2IDQuNzNMNS44MiAyMXoiLz48L3N2Zz4=)](https://github.com/ArkTechNWA)
 
 Zsh execution tool for Claude Code with full Bash parity, yield-based oversight, PTY mode, NEVERHANG circuit breaker, and A.L.A.N. short-term learning.
 
+**Status:** Beta (v0.2.0-beta.1)
+
+**Author:** Claude + MOD
+
+**License:** [MIT](LICENSE)
+
+**Organization:** [ArkTechNWA](https://github.com/ArkTechNWA)
+
+---
+
 **For Johnny5. For us.**
+
+---
+
+## Why?
+
+Claude Code's built-in Bash is limited. Commands can hang forever. No visibility into long-running processes. No learning from past behavior.
+
+zsh-tool is **intelligent shell execution**:
+
+| Problem | zsh-tool Solution |
+|---------|-------------------|
+| Commands hang forever | **Yield-based execution** — always get control back |
+| No visibility into running commands | **zsh_poll** — incremental output collection |
+| Can't interact with prompts | **PTY mode** + **zsh_send** — full interactive support |
+| Timeouts cascade | **NEVERHANG circuit breaker** — fail fast, auto-recover |
+| No memory between calls | **A.L.A.N.** — learns patterns, warns about risky commands |
+| No task management | **zsh_tasks**, **zsh_kill** — full control |
+
+This is the difference between "run commands" and "intelligent shell integration."
+
+---
 
 ## Features
 
-### `zsh` Tool
-Full-parity zsh command execution with yield-based oversight:
-- `command` (required) - The zsh command to execute
-- `timeout` (optional) - Timeout in seconds (default: 120, max: 600)
-- `yield_after` (optional) - Return control after this many seconds if still running (default: 7.0)
-- `description` (optional) - Human-readable description of what this command does
-- `pty` (optional) - Use PTY mode for full terminal emulation
-
 ### Yield-Based Execution
 Commands return after `yield_after` seconds with partial output if still running:
-- No more hanging - you always get control back
-- Incremental output collection with `zsh_poll`
-- Interactive input with `zsh_send`
-- Task management with `zsh_kill` and `zsh_tasks`
+- **No more hanging** — you always get control back
+- **Incremental output** — collect with `zsh_poll`
+- **Interactive input** — send with `zsh_send`
+- **Task management** — `zsh_kill` and `zsh_tasks`
 
 ### PTY Mode
 Full pseudo-terminal emulation for interactive programs:
@@ -38,7 +71,7 @@ Prevents hanging commands from blocking sessions:
 - Tracks timeout patterns per command hash
 - Opens circuit after 3 timeouts in rolling 1-hour window
 - Auto-recovers after 5 minutes
-- States: CLOSED (normal) → OPEN (blocking) → HALF_OPEN (testing)
+- States: `CLOSED` (normal) → `OPEN` (blocking) → `HALF_OPEN` (testing)
 
 ### A.L.A.N. (As Long As Necessary)
 Short-term learning database with temporal decay:
@@ -46,6 +79,8 @@ Short-term learning database with temporal decay:
 - Warns about commands that historically timeout
 - Exponential decay (half-life: 24 hours)
 - Auto-prunes entries below 1% weight
+
+---
 
 ## Tools
 
@@ -62,13 +97,14 @@ Short-term learning database with temporal decay:
 | `zsh_neverhang_status` | Circuit breaker state |
 | `zsh_neverhang_reset` | Reset circuit to CLOSED |
 
+---
+
 ## Installation
 
 ### As Claude Code Plugin
 
-Clone to plugins directory:
 ```bash
-git clone ssh://git@gitlab.arktechnwa.com:2222/johnny5/zsh-tool.git ~/.claude/plugins/zsh-tool
+git clone https://github.com/ArkTechNWA/zsh-tool.git ~/.claude/plugins/zsh-tool
 cd ~/.claude/plugins/zsh-tool
 python3 -m venv .venv
 .venv/bin/pip install mcp
@@ -85,7 +121,6 @@ Enable in `~/.claude/settings.json`:
 
 ### As Standalone MCP Server
 
-Add to `~/.claude.json` via:
 ```bash
 claude mcp add-json --scope user zsh-tool '{
   "command": "/path/to/zsh-tool/.venv/bin/python",
@@ -95,6 +130,8 @@ claude mcp add-json --scope user zsh-tool '{
   }
 }'
 ```
+
+---
 
 ## Architecture
 
@@ -107,10 +144,12 @@ zsh-tool/
 ├── src/
 │   └── server.py      # MCP server
 ├── data/
-│   └── alan.db        # A.L.A.N. SQLite database (created automatically)
-├── .venv/             # Python virtual environment (create on install)
+│   └── alan.db        # A.L.A.N. SQLite database
+├── .venv/             # Python virtual environment
 └── README.md
 ```
+
+---
 
 ## Configuration
 
@@ -119,7 +158,7 @@ Environment variables (set in .mcp.json):
 - `NEVERHANG_TIMEOUT_DEFAULT` - Default timeout (120s)
 - `NEVERHANG_TIMEOUT_MAX` - Maximum timeout (600s)
 
-## Disabling Bash (Optional)
+### Disabling Bash (Optional)
 
 To use zsh as the only shell, add to `~/.claude/settings.json`:
 ```json
@@ -130,9 +169,7 @@ To use zsh as the only shell, add to `~/.claude/settings.json`:
 }
 ```
 
-## Version
-
-0.2.0-beta.1 - Yield-based execution, PTY mode, interactive input support
+---
 
 ## Changelog
 
@@ -148,6 +185,15 @@ To use zsh as the only shell, add to `~/.claude/settings.json`:
 - NEVERHANG circuit breaker
 - A.L.A.N. learning database
 
+---
+
 ## License
 
-MIT
+MIT License - see [LICENSE](LICENSE) for details.
+
+---
+
+<p align="center">
+  <i>Built with obsessive attention to reliability.</i><br>
+  <b>ArkTechNWA</b>
+</p>
