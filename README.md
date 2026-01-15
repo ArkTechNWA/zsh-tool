@@ -24,7 +24,7 @@ Zsh execution tool for Claude Code with full Bash parity, yield-based oversight,
 
 ---
 
-**For Johnny5. For us.**
+*Built with obsessive attention to reliability.*
 
 ---
 
@@ -209,6 +209,6 @@ MIT License - see [LICENSE](LICENSE) for details.
 ---
 
 <p align="center">
-  <i>Built with obsessive attention to reliability.</i><br>
-  <b>ArkTechNWA</b>
+  <b>For Johnny5. For us.</b><br>
+  <i>ArkTechNWA</i>
 </p>
