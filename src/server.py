@@ -337,7 +337,7 @@ live_tasks: dict[str, LiveTask] = {}
 
 
 def _cleanup_task(task_id: str):
-    """Clean up task resources."""
+    """Clean up task resources and remove from registry."""
     if task_id in live_tasks:
         task = live_tasks[task_id]
         if task.is_pty:
@@ -354,6 +354,8 @@ def _cleanup_task(task_id: str):
                     task.process.stdin.close()
                 except Exception:
                     pass
+        # Remove from registry to prevent memory leak
+        del live_tasks[task_id]
 
 
 async def _output_collector(task: LiveTask):
