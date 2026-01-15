@@ -371,6 +371,9 @@ async def _output_collector(task: LiveTask):
                 elif task.process.returncode is not None:
                     # Process finished
                     break
+                else:
+                    # Empty read but process still running - yield to prevent spin
+                    await asyncio.sleep(0.05)
             except asyncio.TimeoutError:
                 # No data available right now, check if process done
                 if task.process.returncode is not None:
@@ -383,6 +386,8 @@ async def _output_collector(task: LiveTask):
                     await task.process.wait()
                     circuit_breaker.record_timeout(alan._hash_command(task.command))
                     break
+                # Yield before continuing to prevent event loop starvation
+                await asyncio.sleep(0.01)
                 continue
 
         # Process completed
