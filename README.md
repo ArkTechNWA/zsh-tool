@@ -7,7 +7,7 @@
 # zsh-tool
 
 [![CI](https://github.com/ArkTechNWA/zsh-tool/actions/workflows/ci.yml/badge.svg)](https://github.com/ArkTechNWA/zsh-tool/actions/workflows/ci.yml)
-[![codecov](https://codecov.io/gh/ArkTechNWA/zsh-tool/branch/master/graph/badge.svg)](https://codecov.io/gh/ArkTechNWA/zsh-tool)
+[![Coverage](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/ArkTechNWA/zsh-tool/master/.github/badges/coverage.json)](https://github.com/ArkTechNWA/zsh-tool/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.13](https://img.shields.io/badge/python-3.13-blue.svg)](https://www.python.org/)
 [![MCP](https://img.shields.io/badge/MCP-Compatible-green.svg)](https://modelcontextprotocol.io)
