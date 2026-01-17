@@ -15,6 +15,7 @@ import os
 import pty
 import re
 import select
+import shutil
 import sqlite3
 import struct
 import termios
@@ -1615,6 +1616,12 @@ async def main():
 
 def run():
     """Entry point for CLI."""
+    # Check zsh availability before starting
+    if not shutil.which('zsh'):
+        import sys
+        print("zsh-tool: zsh not found in PATH. This tool requires zsh to function.", file=sys.stderr)
+        print("zsh-tool: Install zsh or use a different shell tool.", file=sys.stderr)
+        sys.exit(1)
     asyncio.run(main())
 
 
