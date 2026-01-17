@@ -17,27 +17,27 @@
   <!-- Background -->
   <rect width="200" height="200" fill="#1a1a2e" rx="20"/>
 
-  <!-- 8-bit Z character - shifted left -->
+  <!-- 8-bit Z character + sh - centered horizontally -->
   <g filter="url(#glow)">
     <!-- Top bar of Z -->
-    <rect x="15" y="30" width="100" height="14" fill="url(#zGradient)"/>
-    <rect x="15" y="30" width="14" height="14" fill="#ff6666"/>
+    <rect x="46" y="30" width="100" height="14" fill="url(#zGradient)"/>
+    <rect x="46" y="30" width="14" height="14" fill="#ff6666"/>
 
     <!-- Diagonal of Z - stepped pixels -->
-    <rect x="101" y="44" width="14" height="14" fill="url(#zGradient)"/>
-    <rect x="87" y="58" width="14" height="14" fill="url(#zGradient)"/>
-    <rect x="73" y="72" width="14" height="14" fill="url(#zGradient)"/>
-    <rect x="59" y="86" width="14" height="14" fill="url(#zGradient)"/>
-    <rect x="45" y="100" width="14" height="14" fill="url(#zGradient)"/>
-    <rect x="31" y="114" width="14" height="14" fill="url(#zGradient)"/>
+    <rect x="132" y="44" width="14" height="14" fill="url(#zGradient)"/>
+    <rect x="118" y="58" width="14" height="14" fill="url(#zGradient)"/>
+    <rect x="104" y="72" width="14" height="14" fill="url(#zGradient)"/>
+    <rect x="90" y="86" width="14" height="14" fill="url(#zGradient)"/>
+    <rect x="76" y="100" width="14" height="14" fill="url(#zGradient)"/>
+    <rect x="62" y="114" width="14" height="14" fill="url(#zGradient)"/>
 
     <!-- Bottom bar of Z -->
-    <rect x="15" y="128" width="100" height="14" fill="url(#zGradient)"/>
-    <rect x="101" y="128" width="14" height="14" fill="#ff6666"/>
+    <rect x="46" y="128" width="100" height="14" fill="url(#zGradient)"/>
+    <rect x="132" y="128" width="14" height="14" fill="#ff6666"/>
   </g>
 
   <!-- "sh" text in gray - starts at middle of z -->
-  <text x="65" y="130"
+  <text x="96" y="130"
         font-family="'Courier New', monospace"
         font-size="48"
         font-weight="bold"
