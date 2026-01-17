@@ -24,9 +24,10 @@ test:
   image: python:3.13-slim
   before_script:
     - python -m pip install --upgrade pip
-    - pip install -e ".[dev]" || pip install -e . pytest pytest-cov
+    - pip install pytest pytest-cov
+    - pip install -e .
   script:
-    - pytest tests/ -v --cov=zsh_tool --cov-report=term --cov-report=xml:coverage.xml
+    - python -m pytest tests/ -v --cov=zsh_tool --cov-report=term --cov-report=xml:coverage.xml
   coverage: '/TOTAL.*\s+(\d+%)/'
   artifacts:
     reports:
