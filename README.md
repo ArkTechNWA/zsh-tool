@@ -6,7 +6,7 @@
 
 # zsh-tool
 
-[![CI](https://img.shields.io/badge/CI-GitLab-orange?logo=gitlab)](https://gitlab.arktechnwa.com/arktechnwa/mcp/zsh-tool/-/pipelines)
+[![Pipeline Status](https://gitlab.arktechnwa.com/arktechnwa/mcp/zsh-tool/badges/master/pipeline.svg)](https://gitlab.arktechnwa.com/arktechnwa/mcp/zsh-tool/-/pipelines)
 [![GitHub Mirror](https://img.shields.io/badge/github-mirror-blue?logo=github)](https://github.com/ArkTechNWA/zsh-tool)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![MCP Compatible](https://img.shields.io/badge/MCP-Compatible-green?logo=data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCI+PHBhdGggZmlsbD0id2hpdGUiIGQ9Ik0xMiAyQzYuNDggMiAyIDYuNDggMiAxMnM0LjQ4IDEwIDEwIDEwIDEwLTQuNDggMTAtMTBTMTcuNTIgMiAxMiAyem0tMiAxNWwtNS01IDEuNDEtMS40MUwxMCAxNC4xN2w3LjU5LTcuNTlMMTkgOGwtOSA5eiIvPjwvc3ZnPg==)](https://modelcontextprotocol.io)
@@ -85,6 +85,22 @@ Intelligent short-term learning — *"Maybe you're fuckin' up, maybe you're doin
 - **Proactive Insights** — contextual feedback before you run commands
 - **Session Memory** — 15-minute rolling window tracks recent activity
 - **Temporal Decay** — exponential decay (24h half-life), auto-prunes
+- **SSH Intelligence** — separates host connectivity from remote command success
+
+#### SSH Tracking
+A.L.A.N. treats SSH commands specially, recording two separate observations:
+
+| Observation | What it tracks | Example insight |
+|-------------|----------------|-----------------|
+| **Host connectivity** | Can we connect to this host? | *"Host 'vps' has 67% connection failure rate"* |
+| **Remote command** | Does this command work across hosts? | *"Remote command 'git pull' reliable across 3 hosts"* |
+
+Exit code classification:
+- `0` — Success (connected AND command succeeded)
+- `255` — Connection failed (SSH couldn't connect)
+- `1-254` — Command failed (connected but remote command failed)
+
+This means when `ssh host3 'git pull'` fails with exit 255, A.L.A.N. knows the *host* was unreachable—not that `git pull` is broken.
 
 ---
 
@@ -178,6 +194,16 @@ To use zsh as the only shell, add to `~/.claude/settings.json`:
 ---
 
 ## Changelog
+
+### 0.3.1
+**SSH Intelligence** — *Separate host connectivity from remote command success*
+- SSH commands now record dual observations (host + remote command)
+- Exit code classification: 0=success, 255=connection_failed, 1-254=command_failed
+- New `ssh_observations` table for SSH-specific tracking
+- `get_ssh_host_stats()` — per-host connection/command success rates
+- `get_ssh_command_stats()` — per-command stats across all hosts
+- SSH-specific insights: flaky hosts, reliable hosts, failing commands
+- 31 new tests for SSH tracking
 
 ### 0.3.0
 **A.L.A.N. 2.0** — *"Maybe you're fuckin' up, maybe you're doing it right."*
