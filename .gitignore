@@ -27,3 +27,6 @@ Thumbs.db
 dist/
 *.egg-info/
 .coverage
+
+# Local development config
+.mcp.local.json

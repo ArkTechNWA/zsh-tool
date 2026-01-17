@@ -154,6 +154,28 @@ Enable in `~/.claude/settings.json`:
 
 The bundled `scripts/run-mcp.sh` creates a venv and installs automatically.
 
+### Local Development
+
+For local development/testing, the wrapper script automatically detects when `CLAUDE_PLUGIN_ROOT` isn't expanded and uses the calculated plugin root directory instead. No configuration changes needed.
+
+Alternatively, create a `.mcp.local.json` with absolute paths:
+```json
+{
+  "mcpServers": {
+    "zsh-tool": {
+      "type": "stdio",
+      "command": "/path/to/zsh-tool/scripts/run-mcp.sh",
+      "env": {
+        "NEVERHANG_TIMEOUT_DEFAULT": "120",
+        "NEVERHANG_TIMEOUT_MAX": "600"
+      }
+    }
+  }
+}
+```
+
+The `ALAN_DB_PATH` will be automatically set to `{plugin_root}/data/alan.db` if not explicitly provided.
+
 ---
 
 ## Architecture
