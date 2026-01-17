@@ -14,7 +14,7 @@
 
 Zsh execution tool for Claude Code with full Bash parity, yield-based oversight, PTY mode, NEVERHANG circuit breaker, and A.L.A.N. short-term learning.
 
-**Status:** Beta (v0.4.0)
+**Status:** Beta (v0.4.5)
 
 **Author:** Claude + Meldrey
 
@@ -30,12 +30,15 @@ Zsh execution tool for Claude Code with full Bash parity, yield-based oversight,
 
 ## Why?
 
-Claude Code's built-in Bash is limited. Commands can hang forever. No visibility into long-running processes. No learning from past behavior.
+**The #1 reason:** If you use zsh, Claude Code's Bash tool causes quotation mismatches and shell confusion. Every debug loop costs tokens. zsh-tool eliminates this instantly and permanently.
+
+**The token math:** One avoided debug spiral = 30+ seconds saved, hundreds of tokens preserved. The 2-second MCP overhead pays for itself on the first avoided confusion.
 
 zsh-tool is **intelligent shell execution**:
 
 | Problem | zsh-tool Solution |
 |---------|-------------------|
+| Bash/zsh quotation confusion | **Native zsh** — no shell mismatch, no debug loops |
 | Commands hang forever | **Yield-based execution** — always get control back |
 | No visibility into running commands | **zsh_poll** — incremental output collection |
 | Can't interact with prompts | **PTY mode** + **zsh_send** — full interactive support |
@@ -123,13 +126,21 @@ This means when `ssh host3 'git pull'` fails with exit 255, A.L.A.N. knows the *
 
 ## Installation
 
-### As Claude Code Plugin
+### From Marketplace (Recommended)
+
+Add the ArkTechNWA marketplace to Claude Code:
+```
+ArkTechNWA/claude-plugins
+```
+
+Then install: `/plugin install arktechnwa/zsh-tool`
+
+**That's it.** The plugin auto-installs dependencies on first run.
+
+### Manual Installation
 
 ```bash
 git clone https://github.com/ArkTechNWA/zsh-tool.git ~/.claude/plugins/zsh-tool
-cd ~/.claude/plugins/zsh-tool
-python3 -m venv .venv
-.venv/bin/pip install mcp
 ```
 
 Enable in `~/.claude/settings.json`:
@@ -141,17 +152,7 @@ Enable in `~/.claude/settings.json`:
 }
 ```
 
-### As Standalone MCP Server
-
-```bash
-claude mcp add-json --scope user zsh-tool '{
-  "command": "/path/to/zsh-tool/.venv/bin/python",
-  "args": ["/path/to/zsh-tool/src/server.py"],
-  "env": {
-    "ALAN_DB_PATH": "/path/to/zsh-tool/data/alan.db"
-  }
-}'
-```
+The bundled `scripts/run-mcp.sh` creates a venv and installs automatically.
 
 ---
 
@@ -195,8 +196,15 @@ To use zsh as the only shell, add to `~/.claude/settings.json`:
 
 ## Changelog
 
+### 0.4.5
+**Bundled Plugin** — *Zero-friction marketplace install*
+- Auto-install wrapper (`scripts/run-mcp.sh`) creates venv on first run
+- Portable `.mcp.json` using `${CLAUDE_PLUGIN_ROOT}`
+- ArkTechNWA marketplace support
+- No manual pip install required
+
 ### 0.4.0
-**Test Suite & CI** — *290 tests, 91% coverage*
+**Test Suite & CI** — *290 tests, 89% coverage*
 - Comprehensive test suite covering all modules
 - CI pipeline with test and lint stages
 - Dynamic pipeline and coverage badges
