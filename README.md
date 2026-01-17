@@ -14,7 +14,7 @@
 
 Zsh execution tool for Claude Code with full Bash parity, yield-based oversight, PTY mode, NEVERHANG circuit breaker, and A.L.A.N. short-term learning.
 
-**Status:** Beta (v0.3.0)
+**Status:** Beta (v0.4.0)
 
 **Author:** Claude + Meldrey
 
@@ -194,6 +194,15 @@ To use zsh as the only shell, add to `~/.claude/settings.json`:
 ---
 
 ## Changelog
+
+### 0.4.0
+**Test Suite & CI** — *290 tests, 91% coverage*
+- Comprehensive test suite covering all modules
+- CI pipeline with test and lint stages
+- Dynamic pipeline and coverage badges
+- Gentle test runner (`run_tests.sh`) with nice and sleep between files
+- Fixed deprecation warnings and lint errors
+- Added pytest-asyncio for async test support
 
 ### 0.3.1
 **SSH Intelligence** — *Separate host connectivity from remote command success*
