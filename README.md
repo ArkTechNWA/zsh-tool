@@ -6,8 +6,8 @@
 
 # zsh-tool
 
-[![Pipeline](https://gitlab.arktechnwa.com/arktechnwa/mcp/zsh-tool/badges/master/pipeline.svg)](https://gitlab.arktechnwa.com/arktechnwa/mcp/zsh-tool/-/pipelines)
-[![Coverage](https://gitlab.arktechnwa.com/arktechnwa/mcp/zsh-tool/badges/master/coverage.svg)](https://gitlab.arktechnwa.com/arktechnwa/mcp/zsh-tool/-/pipelines)
+[![CI](https://github.com/ArkTechNWA/zsh-tool/actions/workflows/ci.yml/badge.svg)](https://github.com/ArkTechNWA/zsh-tool/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/ArkTechNWA/zsh-tool/branch/master/graph/badge.svg)](https://codecov.io/gh/ArkTechNWA/zsh-tool)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.13](https://img.shields.io/badge/python-3.13-blue.svg)](https://www.python.org/)
 [![MCP](https://img.shields.io/badge/MCP-Compatible-green.svg)](https://modelcontextprotocol.io)
