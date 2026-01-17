@@ -24,7 +24,7 @@ test:
   image: python:3.13-slim
   before_script:
     - python -m pip install --upgrade pip
-    - pip install pytest pytest-cov
+    - pip install pytest pytest-cov pytest-asyncio
     - pip install -e .
   script:
     - python -m pytest tests/ -v --cov=zsh_tool --cov-report=term --cov-report=xml:coverage.xml
