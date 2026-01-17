@@ -22,7 +22,7 @@ import time
 import uuid
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 from pathlib import Path
 from typing import Any, Optional
@@ -324,7 +324,7 @@ class ALAN:
                 1 if timed_out else 0,
                 stdout[:500] if stdout else None,
                 stderr[:500] if stderr else None,
-                datetime.utcnow().isoformat()
+                datetime.now(timezone.utc).isoformat()
             ))
 
             # Record in recent_commands (hot cache)
@@ -366,7 +366,7 @@ class ALAN:
                     exit_type,
                     duration_ms,
                     1 if timed_out else 0,
-                    datetime.utcnow().isoformat()
+                    datetime.now(timezone.utc).isoformat()
                 ))
 
             # Update streak
@@ -801,7 +801,7 @@ class ALAN:
 
             conn.execute("""
                 INSERT OR REPLACE INTO meta (key, value) VALUES ('last_prune', ?)
-            """, (datetime.utcnow().isoformat(),))
+            """, (datetime.now(timezone.utc).isoformat(),))
 
     def maybe_prune(self):
         """Prune if enough time has passed."""
@@ -809,7 +809,7 @@ class ALAN:
             row = conn.execute("SELECT value FROM meta WHERE key = 'last_prune'").fetchone()
             if row:
                 last_prune = datetime.fromisoformat(row['value'])
-                if datetime.utcnow() - last_prune < timedelta(hours=ALAN_PRUNE_INTERVAL_HOURS):
+                if datetime.now(timezone.utc) - last_prune < timedelta(hours=ALAN_PRUNE_INTERVAL_HOURS):
                     return
         self.prune()
 
@@ -1021,8 +1021,6 @@ async def _output_collector(task: LiveTask):
 
 async def _pty_output_collector(task: LiveTask):
     """Background coroutine that collects output from a PTY."""
-    loop = asyncio.get_event_loop()
-
     try:
         while True:
             # Check if process is still running

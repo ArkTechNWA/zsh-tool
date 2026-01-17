@@ -8,7 +8,7 @@ version = "0.3.1"
 description = "Zsh for Claude Code. PTY mode lets Claude type passwords. NEVERHANG + A.L.A.N."
 readme = "README.md"
 license = {text = "MIT"}
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 authors = [
     {name = "ArkTechNWA", email = "claude@arktechnwa.com"}
 ]
@@ -20,9 +20,9 @@ classifiers = [
     "License :: OSI Approved :: MIT License",
     "Operating System :: POSIX :: Linux",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Topic :: System :: Shells",
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
@@ -41,3 +41,10 @@ zsh-tool-mcp = "zsh_tool.server:run"
 
 [tool.hatch.build.targets.wheel]
 packages = ["zsh_tool"]
+
+[tool.ruff]
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W"]
+ignore = ["E501"]  # line too long
