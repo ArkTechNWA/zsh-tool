@@ -132,6 +132,25 @@ class ALAN:
                     key TEXT PRIMARY KEY,
                     value TEXT
                 );
+
+                -- SSH-specific observations (Issue #2: separate host and command tracking)
+                CREATE TABLE IF NOT EXISTS ssh_observations (
+                    id TEXT PRIMARY KEY,
+                    observation_id TEXT,  -- Links to main observations table
+                    host TEXT NOT NULL,
+                    remote_command TEXT,
+                    remote_command_template TEXT,
+                    exit_code INTEGER,
+                    exit_type TEXT,  -- 'success', 'connection_failed', 'command_failed'
+                    duration_ms INTEGER,
+                    timed_out INTEGER DEFAULT 0,
+                    weight REAL DEFAULT 1.0,
+                    created_at TEXT NOT NULL
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_ssh_host ON ssh_observations(host);
+                CREATE INDEX IF NOT EXISTS idx_ssh_remote_template ON ssh_observations(remote_command_template);
+                CREATE INDEX IF NOT EXISTS idx_ssh_exit_type ON ssh_observations(exit_type);
             """)
 
             # A.L.A.N. 2.0 migrations - add columns if missing
@@ -205,6 +224,80 @@ class ALAN:
 
         return ' '.join(template_parts)
 
+    def _parse_ssh_command(self, command: str) -> Optional[dict]:
+        """
+        Parse SSH command to extract host and remote command.
+
+        Returns dict with:
+          - host: the target hostname/IP
+          - remote_command: the command run on remote (if any)
+          - user: username (if specified)
+          - port: port (if specified)
+
+        Returns None if not an SSH command.
+        """
+        normalized = re.sub(r'\s+', ' ', command.strip())
+        parts = normalized.split()
+
+        if not parts or parts[0] != 'ssh':
+            return None
+
+        result = {'host': None, 'remote_command': None, 'user': None, 'port': None}
+
+        i = 1
+        while i < len(parts):
+            part = parts[i]
+
+            # Handle common SSH flags
+            if part in ('-p', '-l', '-i', '-o', '-F', '-J', '-W'):
+                # These take an argument
+                i += 2
+                if part == '-p' and i - 1 < len(parts):
+                    result['port'] = parts[i - 1]
+                elif part == '-l' and i - 1 < len(parts):
+                    result['user'] = parts[i - 1]
+                continue
+            elif part.startswith('-'):
+                # Flags without arguments (or combined like -vvv)
+                i += 1
+                continue
+
+            # This should be the host (possibly user@host)
+            if result['host'] is None:
+                if '@' in part:
+                    result['user'], result['host'] = part.rsplit('@', 1)
+                else:
+                    result['host'] = part
+                i += 1
+
+                # Everything after host is the remote command
+                if i < len(parts):
+                    result['remote_command'] = ' '.join(parts[i:])
+                break
+            else:
+                i += 1
+
+        return result if result['host'] else None
+
+    def _classify_ssh_exit(self, exit_code: int) -> str:
+        """
+        Classify SSH exit code into failure type.
+
+        Returns:
+          - 'success': Connection and command both succeeded
+          - 'connection_failed': SSH couldn't connect (exit 255)
+          - 'command_failed': SSH connected but remote command failed (exit 1-254)
+          - 'unknown': Unexpected exit code
+        """
+        if exit_code == 0:
+            return 'success'
+        elif exit_code == 255:
+            return 'connection_failed'
+        elif 1 <= exit_code <= 254:
+            return 'command_failed'
+        else:
+            return 'unknown'
+
     def record(self, command: str, exit_code: int, duration_ms: int,
                timed_out: bool = False, stdout: str = "", stderr: str = ""):
         """Record a command execution for learning."""
@@ -212,6 +305,7 @@ class ALAN:
         command_template = self._template_command(command)
         success = 1 if (exit_code == 0 and not timed_out) else 0
         now = time.time()
+        observation_id = str(uuid.uuid4())
 
         with self._connect() as conn:
             # Record in observations (long-term learning)
@@ -221,7 +315,7 @@ class ALAN:
                  duration_ms, timed_out, output_snippet, error_snippet, weight, created_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1.0, ?)
             """, (
-                str(uuid.uuid4()),
+                observation_id,
                 command_hash,
                 command_template,
                 command[:200],
@@ -250,6 +344,30 @@ class ALAN:
                 1 if timed_out else 0,
                 success
             ))
+
+            # SSH-specific dual recording (Issue #2)
+            ssh_info = self._parse_ssh_command(command)
+            if ssh_info:
+                exit_type = self._classify_ssh_exit(exit_code)
+                remote_template = self._template_command(ssh_info['remote_command']) if ssh_info['remote_command'] else None
+
+                conn.execute("""
+                    INSERT INTO ssh_observations
+                    (id, observation_id, host, remote_command, remote_command_template,
+                     exit_code, exit_type, duration_ms, timed_out, weight, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1.0, ?)
+                """, (
+                    str(uuid.uuid4()),
+                    observation_id,
+                    ssh_info['host'],
+                    ssh_info['remote_command'][:200] if ssh_info['remote_command'] else None,
+                    remote_template,
+                    exit_code,
+                    exit_type,
+                    duration_ms,
+                    1 if timed_out else 0,
+                    datetime.utcnow().isoformat()
+                ))
 
             # Update streak
             self._update_streak(conn, command_hash, success, now)
@@ -450,7 +568,134 @@ class ALAN:
         else:
             insights.append("New pattern. No history yet.")
 
+        # SSH-specific insights (Issue #2)
+        ssh_info = self._parse_ssh_command(command)
+        if ssh_info:
+            ssh_insights = self._get_ssh_insights(ssh_info)
+            insights.extend(ssh_insights)
+
         return insights
+
+    def _get_ssh_insights(self, ssh_info: dict) -> list:
+        """Generate SSH-specific insights based on host and command history."""
+        insights = []
+        host = ssh_info['host']
+        remote_cmd = ssh_info['remote_command']
+
+        with self._connect() as conn:
+            # Host connectivity stats
+            host_stats = conn.execute("""
+                SELECT
+                    COUNT(*) as total,
+                    SUM(CASE WHEN exit_type = 'success' THEN 1 ELSE 0 END) as successes,
+                    SUM(CASE WHEN exit_type = 'connection_failed' THEN 1 ELSE 0 END) as conn_failures,
+                    SUM(CASE WHEN exit_type = 'command_failed' THEN 1 ELSE 0 END) as cmd_failures,
+                    AVG(duration_ms) as avg_duration
+                FROM ssh_observations
+                WHERE host = ?
+            """, (host,)).fetchone()
+
+            if host_stats and host_stats['total'] > 0:
+                total = host_stats['total']
+                conn_fail_rate = host_stats['conn_failures'] / total
+
+                if conn_fail_rate > 0.3:
+                    insights.append(f"Host '{host}' has {conn_fail_rate*100:.0f}% connection failure rate ({host_stats['conn_failures']}/{total}).")
+                elif host_stats['successes'] == total and total >= 3:
+                    insights.append(f"Host '{host}' is reliable: {total} successful connections.")
+
+            # Remote command stats (if there's a command)
+            if remote_cmd:
+                remote_template = self._template_command(remote_cmd)
+                if remote_template:
+                    cmd_stats = conn.execute("""
+                        SELECT
+                            COUNT(*) as total,
+                            SUM(CASE WHEN exit_type = 'success' THEN 1 ELSE 0 END) as successes,
+                            SUM(CASE WHEN exit_type = 'command_failed' THEN 1 ELSE 0 END) as cmd_failures,
+                            GROUP_CONCAT(DISTINCT host) as hosts
+                        FROM ssh_observations
+                        WHERE remote_command_template = ?
+                    """, (remote_template,)).fetchone()
+
+                    if cmd_stats and cmd_stats['total'] > 0:
+                        total = cmd_stats['total']
+                        success_rate = cmd_stats['successes'] / total
+                        hosts = cmd_stats['hosts'].split(',') if cmd_stats['hosts'] else []
+
+                        if cmd_stats['cmd_failures'] > 0 and success_rate < 0.5:
+                            insights.append(f"Remote command '{remote_template}' fails often ({cmd_stats['cmd_failures']}/{total} across {len(hosts)} hosts).")
+                        elif success_rate > 0.9 and total >= 3:
+                            insights.append(f"Remote command '{remote_template}' reliable across {len(hosts)} hosts ({success_rate*100:.0f}% success).")
+
+        return insights
+
+    def get_ssh_host_stats(self, host: str) -> dict:
+        """Get statistics for a specific SSH host."""
+        with self._connect() as conn:
+            row = conn.execute("""
+                SELECT
+                    COUNT(*) as total,
+                    SUM(CASE WHEN exit_type = 'success' THEN 1 ELSE 0 END) as successes,
+                    SUM(CASE WHEN exit_type = 'connection_failed' THEN 1 ELSE 0 END) as connection_failures,
+                    SUM(CASE WHEN exit_type = 'command_failed' THEN 1 ELSE 0 END) as command_failures,
+                    AVG(duration_ms) as avg_duration_ms,
+                    MIN(created_at) as first_seen,
+                    MAX(created_at) as last_seen
+                FROM ssh_observations
+                WHERE host = ?
+            """, (host,)).fetchone()
+
+            if not row or row['total'] == 0:
+                return {'known': False, 'host': host}
+
+            total = row['total']
+            return {
+                'known': True,
+                'host': host,
+                'total_connections': total,
+                'successes': row['successes'] or 0,
+                'connection_failures': row['connection_failures'] or 0,
+                'command_failures': row['command_failures'] or 0,
+                'connection_success_rate': (total - (row['connection_failures'] or 0)) / total,
+                'overall_success_rate': (row['successes'] or 0) / total,
+                'avg_duration_ms': row['avg_duration_ms'],
+                'first_seen': row['first_seen'],
+                'last_seen': row['last_seen']
+            }
+
+    def get_ssh_command_stats(self, remote_command: str) -> dict:
+        """Get statistics for a remote command across all hosts."""
+        remote_template = self._template_command(remote_command)
+
+        with self._connect() as conn:
+            row = conn.execute("""
+                SELECT
+                    COUNT(*) as total,
+                    COUNT(DISTINCT host) as host_count,
+                    SUM(CASE WHEN exit_type = 'success' THEN 1 ELSE 0 END) as successes,
+                    SUM(CASE WHEN exit_type = 'command_failed' THEN 1 ELSE 0 END) as command_failures,
+                    AVG(duration_ms) as avg_duration_ms,
+                    GROUP_CONCAT(DISTINCT host) as hosts
+                FROM ssh_observations
+                WHERE remote_command_template = ?
+            """, (remote_template,)).fetchone()
+
+            if not row or row['total'] == 0:
+                return {'known': False, 'command_template': remote_template}
+
+            total = row['total']
+            return {
+                'known': True,
+                'command_template': remote_template,
+                'total_executions': total,
+                'host_count': row['host_count'],
+                'hosts': row['hosts'].split(',') if row['hosts'] else [],
+                'successes': row['successes'] or 0,
+                'command_failures': row['command_failures'] or 0,
+                'success_rate': (row['successes'] or 0) / total,
+                'avg_duration_ms': row['avg_duration_ms']
+            }
 
     def get_session_stats(self) -> dict:
         """Get statistics for the current session."""
@@ -537,6 +782,23 @@ class ALAN:
                     SELECT id FROM observations ORDER BY weight DESC LIMIT ?
                 )
             """, (ALAN_MAX_ENTRIES,))
+
+            # Also prune SSH observations (Issue #2)
+            # Apply decay to ssh_observations
+            conn.execute("""
+                UPDATE ssh_observations
+                SET weight = weight * POWER(0.5,
+                    (JULIANDAY('now') - JULIANDAY(created_at)) * 24 / ?
+                )
+                WHERE weight > ?
+            """, (ALAN_DECAY_HALF_LIFE_HOURS, ALAN_PRUNE_THRESHOLD))
+            conn.execute("DELETE FROM ssh_observations WHERE weight < ?", (ALAN_PRUNE_THRESHOLD,))
+            # Clean up orphaned ssh_observations (linked observation was deleted)
+            conn.execute("""
+                DELETE FROM ssh_observations
+                WHERE observation_id NOT IN (SELECT id FROM observations)
+            """)
+
             conn.execute("""
                 INSERT OR REPLACE INTO meta (key, value) VALUES ('last_prune', ?)
             """, (datetime.utcnow().isoformat(),))
