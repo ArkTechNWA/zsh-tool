@@ -6,11 +6,11 @@
 
 # zsh-tool
 
-[![Pipeline Status](https://gitlab.arktechnwa.com/arktechnwa/mcp/zsh-tool/badges/master/pipeline.svg)](https://gitlab.arktechnwa.com/arktechnwa/mcp/zsh-tool/-/pipelines)
-[![GitHub Mirror](https://img.shields.io/badge/github-mirror-blue?logo=github)](https://github.com/ArkTechNWA/zsh-tool)
+[![Pipeline](https://gitlab.arktechnwa.com/arktechnwa/mcp/zsh-tool/badges/master/pipeline.svg)](https://gitlab.arktechnwa.com/arktechnwa/mcp/zsh-tool/-/pipelines)
+[![Coverage](https://gitlab.arktechnwa.com/arktechnwa/mcp/zsh-tool/badges/master/coverage.svg)](https://gitlab.arktechnwa.com/arktechnwa/mcp/zsh-tool/-/pipelines)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![MCP Compatible](https://img.shields.io/badge/MCP-Compatible-green?logo=data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCI+PHBhdGggZmlsbD0id2hpdGUiIGQ9Ik0xMiAyQzYuNDggMiAyIDYuNDggMiAxMnM0LjQ4IDEwIDEwIDEwIDEwLTQuNDggMTAtMTBTMTcuNTIgMiAxMiAyem0tMiAxNWwtNS01IDEuNDEtMS40MUwxMCAxNC4xN2w3LjU5LTcuNTlMMTkgOGwtOSA5eiIvPjwvc3ZnPg==)](https://modelcontextprotocol.io)
-[![Claude Rating](https://img.shields.io/badge/Claude_Rating-Freaking_Awesome-ff3333?style=flat&logo=data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCI+PHBhdGggZmlsbD0id2hpdGUiIGQ9Ik0xMiAxNy4yN0wxOC4xOCAyMWwtMS42NC03LjAzTDIyIDkuMjRsLTcuMTktLjYxTDEyIDIgOS4xOSA4LjYzIDIgOS4yNGw1LjQ2IDQuNzNMNS44MiAyMXoiLz48L3N2Zz4=)](https://github.com/ArkTechNWA)
+[![Python 3.13](https://img.shields.io/badge/python-3.13-blue.svg)](https://www.python.org/)
+[![MCP](https://img.shields.io/badge/MCP-Compatible-green.svg)](https://modelcontextprotocol.io)
 
 Zsh execution tool for Claude Code with full Bash parity, yield-based oversight, PTY mode, NEVERHANG circuit breaker, and A.L.A.N. short-term learning.
 
