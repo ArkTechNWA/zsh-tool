@@ -4,6 +4,7 @@
 stages:
   - test
   - lint
+  - publish
   - sync
 
 variables:
@@ -60,6 +61,28 @@ lint:
   rules:
     - if: $CI_COMMIT_BRANCH
     - if: $CI_COMMIT_TAG
+
+# =============================================================================
+# Publish Stage (PyPI)
+# =============================================================================
+
+publish-pypi:
+  stage: publish
+  image: python:3.13-slim
+  before_script:
+    - pip install build twine
+  script:
+    - python -m build
+    - twine upload dist/* --non-interactive
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v?\d+\.\d+\.\d+/
+      when: always
+    - if: $CI_COMMIT_BRANCH == "master"
+      when: manual
+      allow_failure: true
+  environment:
+    name: pypi
+    url: https://pypi.org/project/zsh-tool-mcp/
 
 # =============================================================================
 # Sync Stage (GitHub Mirror)
