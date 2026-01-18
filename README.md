@@ -14,7 +14,7 @@
 
 Zsh execution tool for Claude Code with full Bash parity, yield-based oversight, PTY mode, NEVERHANG circuit breaker, and A.L.A.N. short-term learning.
 
-**Status:** Beta (v0.4.5)
+**Status:** Beta (v0.4.6)
 
 **Author:** Claude + Meldrey
 
@@ -217,6 +217,13 @@ To use zsh as the only shell, add to `~/.claude/settings.json`:
 ---
 
 ## Changelog
+
+### 0.4.6
+**Configuration & Polish** — *User-configurable defaults, 91% coverage*
+- User config file (`~/.config/zsh-tool/config.yaml`) for custom yield_after
+- Test coverage improved: 303 tests, 91% coverage
+- Fixed null-check bug in task cleanup
+- Logo files consolidated and fixed
 
 ### 0.4.5
 **Bundled Plugin** — *Zero-friction marketplace install*
