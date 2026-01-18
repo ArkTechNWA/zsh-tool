@@ -2,7 +2,7 @@
   "mcpServers": {
     "zsh-tool": {
       "type": "stdio",
-      "command": "./scripts/run-mcp.sh",
+      "command": "${CLAUDE_PLUGIN_ROOT}/scripts/run-mcp.sh",
       "env": {
         "NEVERHANG_TIMEOUT_DEFAULT": "120",
         "NEVERHANG_TIMEOUT_MAX": "600"
