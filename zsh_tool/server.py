@@ -996,7 +996,7 @@ def _cleanup_task(task_id: str):
                     pass
         else:
             # Close stdin if still open
-            if task.process.stdin and not task.process.stdin.is_closing():
+            if task.process and task.process.stdin and not task.process.stdin.is_closing():
                 try:
                     task.process.stdin.close()
                 except Exception:

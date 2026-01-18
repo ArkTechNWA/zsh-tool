@@ -202,6 +202,58 @@ class TestBuildTaskResponse:
         assert resp_success['success'] is True
         assert resp_fail['success'] is False
 
+    def test_timeout_status_response(self):
+        """Timeout status has error message and cleanup triggers."""
+        task = LiveTask(
+            task_id="timeout_test",
+            command="sleep 100",
+            process=None,
+            started_at=time.time(),
+            timeout=60,
+            status="timeout"
+        )
+        live_tasks["timeout_test"] = task
+        response = _build_task_response(task, [])
+
+        assert response['success'] is False
+        assert 'timed out' in response.get('error', '').lower()
+        assert "timeout_test" not in live_tasks  # Cleaned up
+
+    def test_killed_status_response(self):
+        """Killed status has error message and cleanup triggers."""
+        task = LiveTask(
+            task_id="killed_test",
+            command="sleep 100",
+            process=None,
+            started_at=time.time(),
+            timeout=60,
+            status="killed"
+        )
+        live_tasks["killed_test"] = task
+        response = _build_task_response(task, [])
+
+        assert response['success'] is False
+        assert 'killed' in response.get('error', '').lower()
+        assert "killed_test" not in live_tasks  # Cleaned up
+
+    def test_error_status_response(self):
+        """Error status includes error message and cleanup triggers."""
+        task = LiveTask(
+            task_id="error_test",
+            command="some bad command",
+            process=None,
+            started_at=time.time(),
+            timeout=60,
+            status="error",
+            error="Something went wrong"
+        )
+        live_tasks["error_test"] = task
+        response = _build_task_response(task, [])
+
+        assert response['success'] is False
+        assert response.get('error') == "Something went wrong"
+        assert "error_test" not in live_tasks  # Cleaned up
+
 
 @pytest.mark.asyncio
 class TestExecuteZshYielding:

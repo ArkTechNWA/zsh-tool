@@ -287,6 +287,17 @@ class TestSSHInsights:
         fail_insights = [i for i in insights if 'fails often' in i]
         assert len(fail_insights) > 0
 
+    def test_reliable_remote_command_insight(self, alan):
+        """Remote command that succeeds across multiple hosts should get positive insight."""
+        # Run same command successfully across 3 different hosts
+        alan.record("ssh host1 'git pull'", 0, 100)
+        alan.record("ssh host2 'git pull'", 0, 100)
+        alan.record("ssh host3 'git pull'", 0, 100)
+
+        insights = alan.get_insights("ssh host4 'git pull'")
+        reliable_insights = [i for i in insights if 'reliable across' in i and 'hosts' in i]
+        assert len(reliable_insights) > 0
+
 
 class TestPruneSSH:
     """Tests for SSH observation pruning."""
