@@ -1,6 +1,6 @@
 {
   "name": "zsh-tool",
-  "version": "0.4.5",
+  "version": "0.4.6",
   "description": "Zsh shell execution with NEVERHANG circuit breaker and A.L.A.N. learning",
   "author": {
     "name": "ArkTechNWA",
