@@ -52,6 +52,48 @@ NEVERHANG_FAILURE_THRESHOLD = 3   # Failures before circuit opens
 NEVERHANG_RECOVERY_TIMEOUT = 300  # Seconds before trying again
 NEVERHANG_SAMPLE_WINDOW = 3600    # Only count failures in last hour
 
+# User config file
+CONFIG_PATH = Path("~/.config/zsh-tool/config.yaml").expanduser()
+
+
+def _load_user_config() -> dict:
+    """
+    Load user configuration from ~/.config/zsh-tool/config.yaml.
+
+    Returns dict with config values, empty dict if file doesn't exist.
+    Uses simple parsing to avoid yaml dependency.
+    """
+    config = {}
+    if not CONFIG_PATH.exists():
+        return config
+
+    try:
+        content = CONFIG_PATH.read_text()
+        for line in content.splitlines():
+            line = line.strip()
+            # Skip comments and empty lines
+            if not line or line.startswith('#'):
+                continue
+            # Simple key: value parsing
+            if ':' in line:
+                key, value = line.split(':', 1)
+                key = key.strip()
+                value = value.strip()
+                # Parse numeric values
+                if key == 'yield_after':
+                    try:
+                        config[key] = float(value)
+                    except ValueError:
+                        pass  # Invalid value, skip
+    except Exception:
+        pass  # Config read failed, use defaults
+
+    return config
+
+
+# Load user config at startup
+_user_config = _load_user_config()
+
 
 # =============================================================================
 # A.L.A.N. 2.0 - As Long As Necessary
@@ -917,7 +959,7 @@ circuit_breaker = CircuitBreaker()
 # Live Task Manager (Issue #1: Yield-based execution with oversight)
 # =============================================================================
 
-YIELD_AFTER_DEFAULT = 2.0  # Seconds before yielding control back (MCP call returns)
+YIELD_AFTER_DEFAULT = _user_config.get('yield_after', 2.0)  # From ~/.config/zsh-tool/config.yaml or default
 
 @dataclass
 class LiveTask:
