@@ -30,3 +30,6 @@ dist/
 
 # Local development config
 .mcp.local.json
+
+# Claude project context (local only)
+.claude/
