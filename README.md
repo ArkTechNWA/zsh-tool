@@ -1,4 +1,4 @@
-<img align="right" src="assets/logo.png" width="150">
+<img align="right" src="logo.png" width="150">
 
 <!-- mcp-name: io.github.ArkTechNWA/zsh-tool -->
 
