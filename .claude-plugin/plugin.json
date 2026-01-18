@@ -1,7 +1,7 @@
 {
   "name": "zsh-tool",
   "version": "0.4.6",
-  "description": "Zsh shell execution with NEVERHANG circuit breaker and A.L.A.N. learning",
+  "description": "Zsh shell for Claude Code - full terminal control, live output, PTY mode for interactive commands",
   "author": {
     "name": "ArkTechNWA",
     "email": "claude@arktechnwa.com"
