@@ -297,5 +297,134 @@ class TestNonSSHCommands:
         assert not any("remote command" in i.lower() for i in insights)
 
 
+class TestPipelineSegmentRecording:
+    """Tests for pipeline segment recording (Issue #20)."""
+
+    def test_pipeline_segments_recorded(self, alan):
+        """Pipeline segments are recorded as separate observations."""
+        # Record a pipeline with pipestatus
+        alan.record(
+            "cat foo | grep bar | sort",
+            exit_code=1,  # Overall exit (from last command)
+            duration_ms=100,
+            pipestatus=[0, 1, 0]  # cat succeeded, grep failed, sort succeeded
+        )
+
+        # Check that segments were recorded
+        with alan._connect() as conn:
+            # Should have 4 observations: full pipeline + 3 segments
+            count = conn.execute("SELECT COUNT(*) as cnt FROM observations").fetchone()['cnt']
+            assert count == 4
+
+    def test_segment_exit_codes_match_pipestatus(self, alan):
+        """Segment observations have correct exit codes."""
+        alan.record(
+            "cat foo | grep badopts | sort",
+            exit_code=1,
+            duration_ms=100,
+            pipestatus=[0, 2, 0]
+        )
+
+        with alan._connect() as conn:
+            # Find the grep segment (should have exit_code 2)
+            grep_obs = conn.execute(
+                "SELECT exit_code FROM observations WHERE command_preview LIKE 'grep%'"
+            ).fetchone()
+            assert grep_obs is not None
+            assert grep_obs['exit_code'] == 2
+
+    def test_single_command_no_segment_recording(self, alan):
+        """Single command (pipestatus length 1) doesn't record segments."""
+        alan.record(
+            "ls -la",
+            exit_code=0,
+            duration_ms=50,
+            pipestatus=[0]  # Single exit code
+        )
+
+        with alan._connect() as conn:
+            # Should have only 1 observation (the command itself)
+            count = conn.execute("SELECT COUNT(*) as cnt FROM observations").fetchone()['cnt']
+            assert count == 1
+
+    def test_no_pipestatus_no_segment_recording(self, alan):
+        """No pipestatus means no segment recording (backwards compatible)."""
+        alan.record(
+            "cat foo | grep bar",
+            exit_code=0,
+            duration_ms=100,
+            pipestatus=None  # No pipestatus provided
+        )
+
+        with alan._connect() as conn:
+            # Should have only 1 observation
+            count = conn.execute("SELECT COUNT(*) as cnt FROM observations").fetchone()['cnt']
+            assert count == 1
+
+    def test_segment_count_mismatch_skips_recording(self, alan):
+        """Mismatched segment/pipestatus count skips segment recording."""
+        alan.record(
+            "cat foo | grep bar",  # 2 segments
+            exit_code=0,
+            duration_ms=100,
+            pipestatus=[0, 0, 0]  # 3 exit codes - mismatch!
+        )
+
+        with alan._connect() as conn:
+            # Should have only 1 observation (mismatch causes skip)
+            count = conn.execute("SELECT COUNT(*) as cnt FROM observations").fetchone()['cnt']
+            assert count == 1
+
+    def test_segment_streaks_updated(self, alan):
+        """Segment streaks are tracked independently."""
+        # Record same segment failing multiple times
+        for _ in range(3):
+            alan.record(
+                "cat foo | grep -badopts | sort",
+                exit_code=1,
+                duration_ms=100,
+                pipestatus=[0, 2, 0]
+            )
+
+        # Check streak for grep segment (pass command string, not hash)
+        streak = alan.get_streak("grep -badopts")
+        assert streak is not None
+        assert streak['has_streak'] is True
+        assert streak['current'] < 0  # Negative = failures
+
+    def test_segment_recent_commands_recorded(self, alan):
+        """Segments appear in recent_commands table."""
+        alan.record(
+            "cat foo | grep bar",
+            exit_code=0,
+            duration_ms=100,
+            pipestatus=[0, 0]
+        )
+
+        with alan._connect() as conn:
+            # Check recent_commands has segment entries
+            count = conn.execute("SELECT COUNT(*) as cnt FROM recent_commands").fetchone()['cnt']
+            # Full command + 2 segments = 3
+            assert count == 3
+
+    def test_full_pipeline_still_recorded(self, alan):
+        """Full pipeline is still recorded as before."""
+        alan.record(
+            "cat foo | grep bar | sort",
+            exit_code=0,
+            duration_ms=100,
+            pipestatus=[0, 0, 0]
+        )
+
+        with alan._connect() as conn:
+            # Full pipeline should be in observations
+            full = conn.execute(
+                "SELECT * FROM observations WHERE command_preview = ?",
+                ("cat foo | grep bar | sort",)
+            ).fetchone()
+            assert full is not None
+            assert full['exit_code'] == 0
+
+
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])

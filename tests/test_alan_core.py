@@ -357,5 +357,124 @@ class TestDatabaseInit:
             assert 'idx_created_at' in index_names
 
 
+class TestParsePipeline:
+    """Tests for _parse_pipeline() (Issue #20)."""
+
+    def test_simple_pipeline(self, alan):
+        """Simple two-command pipeline."""
+        result = alan._parse_pipeline("cat foo | grep bar")
+        assert result == ["cat foo", "grep bar"]
+
+    def test_three_command_pipeline(self, alan):
+        """Three-command pipeline."""
+        result = alan._parse_pipeline("cat foo | grep bar | sort")
+        assert result == ["cat foo", "grep bar", "sort"]
+
+    def test_single_command_no_pipe(self, alan):
+        """Single command without pipe returns single-element list."""
+        result = alan._parse_pipeline("ls -la")
+        assert result == ["ls -la"]
+
+    def test_quoted_double_pipe_not_split(self, alan):
+        """Pipes inside double quotes are not delimiters."""
+        result = alan._parse_pipeline('echo "a|b" | grep a')
+        assert result == ['echo "a|b"', "grep a"]
+
+    def test_quoted_single_pipe_not_split(self, alan):
+        """Pipes inside single quotes are not delimiters."""
+        result = alan._parse_pipeline("echo 'a|b' | grep a")
+        assert result == ["echo 'a|b'", "grep a"]
+
+    def test_escaped_pipe_not_split(self, alan):
+        """Escaped pipes are not delimiters."""
+        result = alan._parse_pipeline("echo a\\|b | grep a")
+        assert result == ["echo a\\|b", "grep a"]
+
+    def test_logical_or_preserved(self, alan):
+        """|| (logical OR) is preserved, not treated as two pipes."""
+        result = alan._parse_pipeline("cmd1 || cmd2 | cmd3")
+        assert result == ["cmd1 || cmd2", "cmd3"]
+
+    def test_whitespace_trimmed(self, alan):
+        """Whitespace around pipes is trimmed."""
+        result = alan._parse_pipeline("cat foo   |   grep bar")
+        assert result == ["cat foo", "grep bar"]
+
+    def test_empty_command(self, alan):
+        """Empty command returns empty list."""
+        result = alan._parse_pipeline("")
+        assert result == []
+
+    def test_complex_nested_quotes(self, alan):
+        """Complex nested quotes with pipes."""
+        result = alan._parse_pipeline('grep "pattern|other" file.txt | awk \'{print $1|"sort"}\'')
+        assert len(result) == 2
+        assert result[0] == 'grep "pattern|other" file.txt'
+
+    def test_multiple_pipes_in_quotes(self, alan):
+        """Multiple pipes inside quotes."""
+        result = alan._parse_pipeline('echo "a|b|c" | grep -E "x|y"')
+        assert result == ['echo "a|b|c"', 'grep -E "x|y"']
+
+
+class TestPipestatusHelpers:
+    """Tests for pipestatus wrapper and extraction functions (Issue #20)."""
+
+    def test_wrap_for_pipestatus(self):
+        """Wrapping adds pipestatus capture."""
+        from server import _wrap_for_pipestatus, PIPESTATUS_MARKER
+        wrapped = _wrap_for_pipestatus("cat foo | grep bar")
+        assert "cat foo | grep bar" in wrapped
+        assert PIPESTATUS_MARKER in wrapped
+        assert "${pipestatus[*]}" in wrapped
+
+    def test_extract_pipestatus_simple(self):
+        """Extract pipestatus from simple output."""
+        from server import _extract_pipestatus, PIPESTATUS_MARKER
+        output = f"some output\n{PIPESTATUS_MARKER}:0 1\n"
+        clean, pipestatus = _extract_pipestatus(output)
+        assert "some output" in clean
+        assert PIPESTATUS_MARKER not in clean
+        assert pipestatus == [0, 1]
+
+    def test_extract_pipestatus_single_exit(self):
+        """Extract single exit code (no pipeline)."""
+        from server import _extract_pipestatus, PIPESTATUS_MARKER
+        output = f"hello world\n{PIPESTATUS_MARKER}:0\n"
+        clean, pipestatus = _extract_pipestatus(output)
+        assert pipestatus == [0]
+
+    def test_extract_pipestatus_multiple_failures(self):
+        """Extract multiple non-zero exit codes."""
+        from server import _extract_pipestatus, PIPESTATUS_MARKER
+        output = f"error\n{PIPESTATUS_MARKER}:0 2 1\n"
+        clean, pipestatus = _extract_pipestatus(output)
+        assert pipestatus == [0, 2, 1]
+
+    def test_extract_pipestatus_not_found(self):
+        """No marker returns original output and None."""
+        from server import _extract_pipestatus
+        output = "normal output without marker"
+        clean, pipestatus = _extract_pipestatus(output)
+        assert clean == output
+        assert pipestatus is None
+
+    def test_extract_pipestatus_cleans_output(self):
+        """Output is cleaned of marker line."""
+        from server import _extract_pipestatus, PIPESTATUS_MARKER
+        output = f"line1\nline2\n{PIPESTATUS_MARKER}:0 0 0\n"
+        clean, pipestatus = _extract_pipestatus(output)
+        assert "line1" in clean
+        assert "line2" in clean
+        assert PIPESTATUS_MARKER not in clean
+
+    def test_extract_pipestatus_invalid_values(self):
+        """Invalid pipestatus values return None."""
+        from server import _extract_pipestatus, PIPESTATUS_MARKER
+        output = f"output\n{PIPESTATUS_MARKER}:abc def\n"
+        clean, pipestatus = _extract_pipestatus(output)
+        assert pipestatus is None
+
+
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])

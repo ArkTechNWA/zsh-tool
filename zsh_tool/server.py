@@ -105,6 +105,48 @@ ALAN_RECENT_WINDOW_SIZE = 50      # Track last N commands
 ALAN_RECENT_WINDOW_MINUTES = 10   # For retry detection
 ALAN_STREAK_THRESHOLD = 3         # Min streak to report
 
+# Pipeline segment tracking (Issue #20)
+PIPESTATUS_MARKER = "___ZSH_PIPESTATUS_MARKER_f9a8b7c6___"
+
+
+def _wrap_for_pipestatus(command: str) -> str:
+    """Wrap command to capture pipestatus array from zsh."""
+    return f'{command}; echo "{PIPESTATUS_MARKER}:${{pipestatus[*]}}"'
+
+
+def _extract_pipestatus(output: str) -> tuple[str, list[int] | None]:
+    """Extract and strip pipestatus marker from output.
+
+    Returns (clean_output, pipestatus_list).
+    If marker not found, returns (output, None).
+    """
+    marker_pattern = f"{PIPESTATUS_MARKER}:"
+    marker_pos = output.rfind(marker_pattern)
+
+    if marker_pos == -1:
+        return output, None
+
+    # Find the line containing the marker
+    line_start = output.rfind('\n', 0, marker_pos) + 1
+    line_end = output.find('\n', marker_pos)
+    if line_end == -1:
+        line_end = len(output)
+
+    # Extract pipestatus values
+    pipestatus_str = output[marker_pos + len(marker_pattern):line_end].strip()
+
+    try:
+        pipestatus = [int(x) for x in pipestatus_str.split()]
+    except ValueError:
+        # Couldn't parse pipestatus, return original output
+        return output, None
+
+    # Strip the marker line from output
+    clean_output = output[:line_start] + output[line_end + 1:] if line_end < len(output) else output[:line_start].rstrip('\n')
+
+    return clean_output, pipestatus
+
+
 class ALAN:
     """
     Short-term learning database with temporal decay, retry detection,
@@ -322,6 +364,74 @@ class ALAN:
 
         return result if result['host'] else None
 
+    def _parse_pipeline(self, command: str) -> list[str]:
+        """Split command on unquoted pipe characters.
+
+        Handles:
+        - Simple pipes: cmd1 | cmd2
+        - Quoted pipes: echo "a|b" | grep a (the | in quotes is NOT a delimiter)
+        - Escaped pipes: echo a\\|b | grep a
+
+        Returns list of pipeline segment strings.
+        """
+        segments = []
+        current = []
+        i = 0
+        in_single_quote = False
+        in_double_quote = False
+        escape_next = False
+
+        while i < len(command):
+            char = command[i]
+
+            if escape_next:
+                current.append(char)
+                escape_next = False
+                i += 1
+                continue
+
+            if char == '\\':
+                escape_next = True
+                current.append(char)
+                i += 1
+                continue
+
+            if char == "'" and not in_double_quote:
+                in_single_quote = not in_single_quote
+                current.append(char)
+                i += 1
+                continue
+
+            if char == '"' and not in_single_quote:
+                in_double_quote = not in_double_quote
+                current.append(char)
+                i += 1
+                continue
+
+            if char == '|' and not in_single_quote and not in_double_quote:
+                # Check for || (logical OR) - not a pipe
+                if i + 1 < len(command) and command[i + 1] == '|':
+                    current.append('||')
+                    i += 2
+                    continue
+                # It's a pipe delimiter
+                segment = ''.join(current).strip()
+                if segment:
+                    segments.append(segment)
+                current = []
+                i += 1
+                continue
+
+            current.append(char)
+            i += 1
+
+        # Add final segment
+        final = ''.join(current).strip()
+        if final:
+            segments.append(final)
+
+        return segments
+
     def _classify_ssh_exit(self, exit_code: int) -> str:
         """
         Classify SSH exit code into failure type.
@@ -342,8 +452,19 @@ class ALAN:
             return 'unknown'
 
     def record(self, command: str, exit_code: int, duration_ms: int,
-               timed_out: bool = False, stdout: str = "", stderr: str = ""):
-        """Record a command execution for learning."""
+               timed_out: bool = False, stdout: str = "", stderr: str = "",
+               pipestatus: list[int] | None = None):
+        """Record a command execution for learning.
+
+        Args:
+            command: The full command string
+            exit_code: Exit code of the command
+            duration_ms: Duration in milliseconds
+            timed_out: Whether the command timed out
+            stdout: Standard output (truncated)
+            stderr: Standard error (truncated)
+            pipestatus: List of exit codes for each pipeline segment (Issue #20)
+        """
         command_hash = self._hash_command(command)
         command_template = self._template_command(command)
         success = 1 if (exit_code == 0 and not timed_out) else 0
@@ -414,6 +535,59 @@ class ALAN:
 
             # Update streak
             self._update_streak(conn, command_hash, success, now)
+
+            # Pipeline segment recording (Issue #20)
+            # Record each segment of a pipeline separately for per-segment learning
+            if pipestatus and len(pipestatus) > 1:
+                segments = self._parse_pipeline(command)
+                if len(segments) == len(pipestatus):
+                    for seg, seg_exit in zip(segments, pipestatus):
+                        seg = seg.strip()
+                        if seg:  # Skip empty segments
+                            seg_hash = self._hash_command(seg)
+                            seg_template = self._template_command(seg)
+                            seg_success = 1 if seg_exit == 0 else 0
+                            seg_obs_id = str(uuid.uuid4())
+
+                            # Record segment observation
+                            conn.execute("""
+                                INSERT INTO observations
+                                (id, command_hash, command_template, command_preview, exit_code,
+                                 duration_ms, timed_out, output_snippet, error_snippet, weight, created_at)
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1.0, ?)
+                            """, (
+                                seg_obs_id,
+                                seg_hash,
+                                seg_template,
+                                seg[:200],
+                                seg_exit,
+                                0,  # Unknown per-segment duration
+                                0,  # Segments don't have individual timeout
+                                None,  # No output per segment
+                                None,
+                                datetime.now(timezone.utc).isoformat()
+                            ))
+
+                            # Record in recent_commands for segment
+                            conn.execute("""
+                                INSERT INTO recent_commands
+                                (session_id, command_hash, command_template, command_preview,
+                                 timestamp, duration_ms, exit_code, timed_out, success)
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            """, (
+                                self.session_id,
+                                seg_hash,
+                                seg_template,
+                                seg[:200],
+                                now,
+                                0,  # Unknown per-segment duration
+                                seg_exit,
+                                0,  # Not timed out
+                                seg_success
+                            ))
+
+                            # Update streak for segment
+                            self._update_streak(conn, seg_hash, seg_success, now)
 
             # Prune old recent commands
             cutoff = now - (ALAN_RECENT_WINDOW_MINUTES * 60 * 10)  # Keep 10x window
@@ -1047,6 +1221,10 @@ async def _output_collector(task: LiveTask):
             task.exit_code = task.process.returncode
             circuit_breaker.record_success()
 
+        # Extract pipestatus from output (Issue #20)
+        clean_output, pipestatus = _extract_pipestatus(task.output_buffer)
+        task.output_buffer = clean_output  # Strip marker from visible output
+
         # Record in A.L.A.N.
         duration_ms = int((time.time() - task.started_at) * 1000)
         alan.record(
@@ -1054,8 +1232,9 @@ async def _output_collector(task: LiveTask):
             task.exit_code if task.exit_code is not None else -1,
             duration_ms,
             task.status == "timeout",
-            task.output_buffer[:500],
-            ""
+            clean_output[:500],
+            "",
+            pipestatus=pipestatus
         )
         alan.maybe_prune()
 
@@ -1122,6 +1301,10 @@ async def _pty_output_collector(task: LiveTask):
         except (OSError, IOError):
             pass
 
+        # Extract pipestatus from output (Issue #20)
+        clean_output, pipestatus = _extract_pipestatus(task.output_buffer)
+        task.output_buffer = clean_output  # Strip marker from visible output
+
         # Record in A.L.A.N.
         duration_ms = int((time.time() - task.started_at) * 1000)
         alan.record(
@@ -1129,8 +1312,9 @@ async def _pty_output_collector(task: LiveTask):
             task.exit_code if task.exit_code is not None else -1,
             duration_ms,
             task.status == "timeout",
-            task.output_buffer[:500],
-            ""
+            clean_output[:500],
+            "",
+            pipestatus=pipestatus
         )
         alan.maybe_prune()
 
@@ -1172,8 +1356,9 @@ async def execute_zsh_pty(
     pid, master_fd = pty.fork()
 
     if pid == 0:
-        # Child process - exec zsh with command
-        os.execvp('/bin/zsh', ['/bin/zsh', '-c', command])
+        # Child process - exec zsh with command wrapped for pipestatus capture
+        wrapped_command = _wrap_for_pipestatus(command)
+        os.execvp('/bin/zsh', ['/bin/zsh', '-c', wrapped_command])
         # If exec fails, exit
         os._exit(1)
 
@@ -1238,9 +1423,12 @@ async def execute_zsh_yielding(
     # Create task
     task_id = str(uuid.uuid4())[:8]
 
+    # Wrap command for pipestatus capture
+    wrapped_command = _wrap_for_pipestatus(command)
+
     # Start process with stdin pipe for interactive input
     proc = await asyncio.create_subprocess_shell(
-        command,
+        wrapped_command,
         stdin=asyncio.subprocess.PIPE,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.STDOUT,  # Merge stderr into stdout
