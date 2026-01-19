@@ -851,7 +851,9 @@ class ALAN:
         with self._connect() as conn:
             row = conn.execute("SELECT value FROM meta WHERE key = 'last_prune'").fetchone()
             if row:
-                last_prune = datetime.fromisoformat(row['value'])
+                last_prune = datetime.fromisoformat(row['value'].replace('Z', '+00:00'))
+                if last_prune.tzinfo is None:
+                    last_prune = last_prune.replace(tzinfo=timezone.utc)
                 if datetime.now(timezone.utc) - last_prune < timedelta(hours=ALAN_PRUNE_INTERVAL_HOURS):
                     return
         self.prune()

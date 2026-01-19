@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "zsh-tool-mcp"
-version = "0.4.71"
+version = "0.4.72"
 description = "Zsh for Claude Code. PTY mode lets Claude type passwords. NEVERHANG + A.L.A.N."
 readme = "README.md"
 license = {text = "MIT"}
