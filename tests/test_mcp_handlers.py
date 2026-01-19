@@ -10,10 +10,9 @@ import time
 import json
 from pathlib import Path
 
-from zsh_tool.server import (
-    _handle_tool_call, _format_task_output, call_tool,
-    live_tasks, LiveTask, circuit_breaker, CircuitState, alan
-)
+from zsh_tool.server import _handle_tool_call, _format_task_output, call_tool
+from zsh_tool.tasks import live_tasks, LiveTask, circuit_breaker, alan
+from zsh_tool.neverhang import CircuitState
 from mcp.types import TextContent
 
 

@@ -9,12 +9,13 @@ import asyncio
 import time
 from pathlib import Path
 
-from zsh_tool.server import (
+from zsh_tool.tasks import (
     LiveTask, live_tasks, _cleanup_task,
     poll_task, send_to_task, kill_task, list_tasks,
     execute_zsh_yielding, execute_zsh_pty,
-    circuit_breaker, CircuitState
+    circuit_breaker
 )
+from zsh_tool.neverhang import CircuitState
 
 
 class TestListTasks:

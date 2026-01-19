@@ -10,10 +10,11 @@ import time
 from pathlib import Path
 from dataclasses import fields
 
-from zsh_tool.server import (
+from zsh_tool.tasks import (
     LiveTask, live_tasks, _cleanup_task, _build_task_response,
-    execute_zsh_yielding, circuit_breaker, CircuitState
+    execute_zsh_yielding, circuit_breaker
 )
+from zsh_tool.neverhang import CircuitState
 from zsh_tool.config import NEVERHANG_TIMEOUT_DEFAULT, NEVERHANG_TIMEOUT_MAX, YIELD_AFTER_DEFAULT
 
 

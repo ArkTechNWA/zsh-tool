@@ -52,6 +52,10 @@ packages = ["zsh_tool"]
 [tool.pytest.ini_options]
 asyncio_mode = "strict"
 asyncio_default_fixture_loop_scope = "function"
+# Filter benign async subprocess cleanup warnings (event loop closes before GC runs)
+filterwarnings = [
+    "ignore::pytest.PytestUnraisableExceptionWarning",
+]
 
 [tool.ruff]
 target-version = "py311"

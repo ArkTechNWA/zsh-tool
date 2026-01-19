@@ -10,10 +10,11 @@ import time
 import os
 from pathlib import Path
 
-from zsh_tool.server import (
+from zsh_tool.tasks import (
     LiveTask, live_tasks,
-    execute_zsh_pty, circuit_breaker, CircuitState
+    execute_zsh_pty, circuit_breaker
 )
+from zsh_tool.neverhang import CircuitState
 
 
 class TestPTYLiveTask:
