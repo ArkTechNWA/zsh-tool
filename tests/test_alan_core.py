@@ -10,7 +10,7 @@ import time
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
 
-from zsh_tool.server import ALAN
+from zsh_tool.alan import ALAN
 from zsh_tool.config import ALAN_DECAY_HALF_LIFE_HOURS, ALAN_PRUNE_THRESHOLD, ALAN_MAX_ENTRIES
 
 
@@ -420,7 +420,7 @@ class TestPipestatusHelpers:
 
     def test_wrap_for_pipestatus(self):
         """Wrapping adds pipestatus capture."""
-        from zsh_tool.server import _wrap_for_pipestatus
+        from zsh_tool.alan import _wrap_for_pipestatus
         from zsh_tool.config import PIPESTATUS_MARKER
         wrapped = _wrap_for_pipestatus("cat foo | grep bar")
         assert "cat foo | grep bar" in wrapped
@@ -429,7 +429,7 @@ class TestPipestatusHelpers:
 
     def test_extract_pipestatus_simple(self):
         """Extract pipestatus from simple output."""
-        from zsh_tool.server import _extract_pipestatus
+        from zsh_tool.alan import _extract_pipestatus
         from zsh_tool.config import PIPESTATUS_MARKER
         output = f"some output\n{PIPESTATUS_MARKER}:0 1\n"
         clean, pipestatus = _extract_pipestatus(output)
@@ -439,7 +439,7 @@ class TestPipestatusHelpers:
 
     def test_extract_pipestatus_single_exit(self):
         """Extract single exit code (no pipeline)."""
-        from zsh_tool.server import _extract_pipestatus
+        from zsh_tool.alan import _extract_pipestatus
         from zsh_tool.config import PIPESTATUS_MARKER
         output = f"hello world\n{PIPESTATUS_MARKER}:0\n"
         clean, pipestatus = _extract_pipestatus(output)
@@ -447,7 +447,7 @@ class TestPipestatusHelpers:
 
     def test_extract_pipestatus_multiple_failures(self):
         """Extract multiple non-zero exit codes."""
-        from zsh_tool.server import _extract_pipestatus
+        from zsh_tool.alan import _extract_pipestatus
         from zsh_tool.config import PIPESTATUS_MARKER
         output = f"error\n{PIPESTATUS_MARKER}:0 2 1\n"
         clean, pipestatus = _extract_pipestatus(output)
@@ -455,7 +455,7 @@ class TestPipestatusHelpers:
 
     def test_extract_pipestatus_not_found(self):
         """No marker returns original output and None."""
-        from zsh_tool.server import _extract_pipestatus
+        from zsh_tool.alan import _extract_pipestatus
         output = "normal output without marker"
         clean, pipestatus = _extract_pipestatus(output)
         assert clean == output
@@ -463,7 +463,7 @@ class TestPipestatusHelpers:
 
     def test_extract_pipestatus_cleans_output(self):
         """Output is cleaned of marker line."""
-        from zsh_tool.server import _extract_pipestatus
+        from zsh_tool.alan import _extract_pipestatus
         from zsh_tool.config import PIPESTATUS_MARKER
         output = f"line1\nline2\n{PIPESTATUS_MARKER}:0 0 0\n"
         clean, pipestatus = _extract_pipestatus(output)
@@ -473,7 +473,7 @@ class TestPipestatusHelpers:
 
     def test_extract_pipestatus_invalid_values(self):
         """Invalid pipestatus values return None."""
-        from zsh_tool.server import _extract_pipestatus
+        from zsh_tool.alan import _extract_pipestatus
         from zsh_tool.config import PIPESTATUS_MARKER
         output = f"output\n{PIPESTATUS_MARKER}:abc def\n"
         clean, pipestatus = _extract_pipestatus(output)

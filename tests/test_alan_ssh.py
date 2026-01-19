@@ -8,7 +8,7 @@ import pytest
 import tempfile
 from pathlib import Path
 
-from zsh_tool.server import ALAN
+from zsh_tool.alan import ALAN
 
 
 @pytest.fixture
