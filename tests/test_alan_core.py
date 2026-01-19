@@ -6,12 +6,11 @@ Tests database connection, hashing, templating, decay, stats, and pruning.
 
 import pytest
 import tempfile
-import time
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
 
 from zsh_tool.alan import ALAN
-from zsh_tool.config import ALAN_DECAY_HALF_LIFE_HOURS, ALAN_PRUNE_THRESHOLD, ALAN_MAX_ENTRIES
+from zsh_tool.config import ALAN_PRUNE_THRESHOLD, ALAN_MAX_ENTRIES
 
 
 @pytest.fixture
@@ -340,7 +339,7 @@ class TestDatabaseInit:
         """Database parent directory is created if needed."""
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "subdir" / "alan.db"
-            alan = ALAN(db_path)
+            _alan = ALAN(db_path)  # Side effect: creates parent directory
             assert db_path.parent.exists()
             db_path.unlink(missing_ok=True)
 

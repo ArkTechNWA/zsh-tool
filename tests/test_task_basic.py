@@ -7,7 +7,6 @@ Tests LiveTask, basic command execution, and task management.
 import pytest
 import asyncio
 import time
-from pathlib import Path
 from dataclasses import fields
 
 from zsh_tool.tasks import (

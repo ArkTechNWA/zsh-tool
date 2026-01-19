@@ -7,8 +7,6 @@ Tests PTY execution mode for full terminal emulation.
 import pytest
 import asyncio
 import time
-import os
-from pathlib import Path
 
 from zsh_tool.tasks import (
     LiveTask, live_tasks,

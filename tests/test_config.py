@@ -1,8 +1,7 @@
 """Tests for user configuration loading."""
 
-import pytest
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 
 class TestLoadUserConfig:

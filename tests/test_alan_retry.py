@@ -8,7 +8,6 @@ import pytest
 import tempfile
 import time
 from pathlib import Path
-from unittest.mock import patch
 
 from zsh_tool.alan import ALAN
 from zsh_tool.config import ALAN_RECENT_WINDOW_MINUTES

@@ -8,7 +8,6 @@ import pytest
 import asyncio
 import os
 import signal
-from pathlib import Path
 
 
 def _cleanup_tasks_sync():

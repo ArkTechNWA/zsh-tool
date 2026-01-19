@@ -6,7 +6,6 @@ Tests streak detection, updates, and longest streak tracking.
 
 import pytest
 import tempfile
-import time
 from pathlib import Path
 
 from zsh_tool.alan import ALAN

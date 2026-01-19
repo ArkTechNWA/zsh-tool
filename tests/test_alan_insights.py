@@ -6,11 +6,10 @@ Tests proactive insight generation based on retries, streaks, patterns, and simi
 
 import pytest
 import tempfile
-import time
 from pathlib import Path
 
 from zsh_tool.alan import ALAN
-from zsh_tool.config import ALAN_RECENT_WINDOW_MINUTES, ALAN_STREAK_THRESHOLD
+from zsh_tool.config import ALAN_STREAK_THRESHOLD
 
 
 @pytest.fixture
