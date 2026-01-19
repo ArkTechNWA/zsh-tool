@@ -33,3 +33,7 @@ dist/
 
 # Claude project context (local only)
 .claude/
+
+# Local
+.serena/
+discord-ad.md
