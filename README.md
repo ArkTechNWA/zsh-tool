@@ -13,7 +13,7 @@
 
 Zsh execution tool for Claude Code with full Bash parity, yield-based oversight, PTY mode, NEVERHANG circuit breaker, and A.L.A.N. short-term learning.
 
-**Status:** Beta (v0.4.77)
+**Status:** Beta (v0.4.80)
 
 **Author:** Claude + Meldrey
 
@@ -217,6 +217,20 @@ To use zsh as the only shell, add to `~/.claude/settings.json`:
 ---
 
 ## Changelog
+
+### 0.4.80
+**Per-Segment Exit Codes** — *Know exactly which command failed*
+- Exit codes now show `[cmd1:0,cmd2:1,cmd3:0]` format instead of single integer
+- Each pipeline segment paired with its actual exit status from zsh `$pipestatus`
+- A.L.A.N. learning receives accurate per-command outcomes
+- Self-documenting output for human and AI analysis
+- Fixes bug where all commands reported `exit=0` regardless of actual status
+
+### 0.4.79
+**Server Modular Refactoring** — *Cleaner architecture*
+- Extracted MCP server into `zsh_tool/server.py` module
+- Centralized configuration in `zsh_tool/config.py`
+- Fixed plugin.json version sync with package version
 
 ### 0.4.75
 **Pipeline Intelligence** — *Know which segment of your pipeline is failing*
