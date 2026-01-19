@@ -38,8 +38,7 @@ test:
         path: coverage.xml
     expire_in: 1 week
   rules:
-    - if: $CI_COMMIT_BRANCH
-    - if: $CI_COMMIT_TAG
+    - if: $CI_COMMIT_BRANCH  # Only branches - tags inherit commit status
 
 # =============================================================================
 # Lint Stage
@@ -59,8 +58,7 @@ lint:
     expire_in: 1 week
   allow_failure: true
   rules:
-    - if: $CI_COMMIT_BRANCH
-    - if: $CI_COMMIT_TAG
+    - if: $CI_COMMIT_BRANCH  # Only branches
 
 # =============================================================================
 # Publish Stage (PyPI + GitLab Release)
@@ -85,12 +83,23 @@ publish-pypi:
 
 # Full release: PyPI publish + GitLab Release creation
 # Manual button on tags - one click does everything
+# Gate: requires passing pipeline on the commit before publishing
 release:
   stage: publish
   image: registry.gitlab.com/gitlab-org/release-cli:latest
   before_script:
-    - apk add --no-cache python3 py3-pip
+    - apk add --no-cache python3 py3-pip curl jq
     - pip install build twine --break-system-packages
+    # Gate: require passing pipeline on this commit
+    - |
+      PASS_COUNT=$(curl -s "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/pipelines?sha=${CI_COMMIT_SHA}&status=success" \
+        -H "PRIVATE-TOKEN: ${CI_JOB_TOKEN}" | jq 'length')
+      if [ "$PASS_COUNT" -eq 0 ]; then
+        echo "❌ No passing pipeline for commit ${CI_COMMIT_SHA}"
+        echo "   Tests must pass before release."
+        exit 1
+      fi
+      echo "✓ Commit has passing pipeline"
   script:
     - python3 -m build
     - twine upload dist/* --non-interactive
@@ -113,9 +122,12 @@ release:
 sync-to-github:
   stage: sync
   image: alpine:latest
+  needs:
+    - job: release
+      optional: true  # On master (no release), allows manual sync
   rules:
     - if: $CI_COMMIT_TAG
-      when: always
+      when: on_success  # Auto-sync after release succeeds
     - if: $CI_COMMIT_BRANCH == "master"
       when: manual
       allow_failure: true

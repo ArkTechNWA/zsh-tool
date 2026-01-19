@@ -6,15 +6,14 @@
 
 # zsh-tool
 
-[![CI](https://github.com/ArkTechNWA/zsh-tool/actions/workflows/ci.yml/badge.svg)](https://github.com/ArkTechNWA/zsh-tool/actions/workflows/ci.yml)
-[![Coverage](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/ArkTechNWA/zsh-tool/master/.github/badges/coverage.json)](https://github.com/ArkTechNWA/zsh-tool/actions/workflows/ci.yml)
+[![tests](https://img.shields.io/gitlab/pipeline-status/arktechnwa%2Fmcp%2Fzsh-tool?branch=master&gitlab_url=https%3A%2F%2Fgitlab.arktechnwa.com&label=tests)](https://gitlab.arktechnwa.com/arktechnwa/mcp/zsh-tool/-/pipelines)
+[![coverage](https://img.shields.io/gitlab/pipeline-coverage/arktechnwa%2Fmcp%2Fzsh-tool?branch=master&gitlab_url=https%3A%2F%2Fgitlab.arktechnwa.com)](https://gitlab.arktechnwa.com/arktechnwa/mcp/zsh-tool/-/pipelines)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.13](https://img.shields.io/badge/python-3.13-blue.svg)](https://www.python.org/)
-[![MCP](https://img.shields.io/badge/MCP-Compatible-green.svg)](https://modelcontextprotocol.io)
 
 Zsh execution tool for Claude Code with full Bash parity, yield-based oversight, PTY mode, NEVERHANG circuit breaker, and A.L.A.N. short-term learning.
 
-**Status:** Beta (v0.4.75)
+**Status:** Beta (v0.4.77)
 
 **Author:** Claude + Meldrey
 
