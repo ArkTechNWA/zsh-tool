@@ -2,7 +2,7 @@
 # Real CI that actually checks code quality
 
 include:
-  - project: 'johnny5/ci-utils'
+  - project: 'arktechnwa/ci-utils'
     file: '/templates/failure-issue.yml'
 
 stages:
