@@ -6,7 +6,7 @@
 
 # zsh-tool
 
-[![tests](https://img.shields.io/gitlab/pipeline-status/arktechnwa%2Fmcp%2Fzsh-tool?branch=master&gitlab_url=https%3A%2F%2Fgitlab.arktechnwa.com&label=tests)](https://gitlab.arktechnwa.com/arktechnwa/mcp/zsh-tool/-/pipelines)
+[![CI/CD](https://img.shields.io/gitlab/pipeline-status/arktechnwa%2Fmcp%2Fzsh-tool?branch=master&gitlab_url=https%3A%2F%2Fgitlab.arktechnwa.com&label=CI%2FCD)](https://gitlab.arktechnwa.com/arktechnwa/mcp/zsh-tool/-/pipelines)
 [![coverage](https://img.shields.io/gitlab/pipeline-coverage/arktechnwa%2Fmcp%2Fzsh-tool?branch=master&gitlab_url=https%3A%2F%2Fgitlab.arktechnwa.com)](https://gitlab.arktechnwa.com/arktechnwa/mcp/zsh-tool/-/pipelines)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.13](https://img.shields.io/badge/python-3.13-blue.svg)](https://www.python.org/)
