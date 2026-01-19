@@ -44,6 +44,14 @@ test:
 # Lint Stage
 # =============================================================================
 
+version-check:
+  stage: lint
+  image: python:3.13-slim
+  script:
+    - python scripts/version-check.py
+  rules:
+    - if: $CI_COMMIT_BRANCH  # All branches
+
 lint:
   stage: lint
   image: python:3.13-slim
