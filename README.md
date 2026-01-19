@@ -31,7 +31,7 @@ Zsh execution tool for Claude Code with full Bash parity, yield-based oversight,
 
 **The #1 reason:** If you use zsh, Claude Code's Bash tool causes quotation mismatches and shell confusion. Every debug loop costs tokens. zsh-tool eliminates this instantly and permanently.
 
-**The visibility paradox:** zsh-tool's stats make problems visible—Bash's silence makes you think everything's fine. One shows you reality; the other hides it.
+**The token math:** One avoided debug spiral = 30+ seconds saved, hundreds of tokens preserved.
 
 zsh-tool is **intelligent shell execution**:
 
