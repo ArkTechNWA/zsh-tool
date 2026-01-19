@@ -57,18 +57,6 @@ version-check:
   rules:
     - if: $CI_COMMIT_BRANCH  # All branches
 
-# Temporary: Test failure-issue integration (remove after testing)
-test-failure-issue:
-  stage: lint
-  image: alpine:latest
-  extends: .failure-issue
-  script:
-    - echo "This job will fail intentionally"
-    - exit 1
-  rules:
-    - if: $CI_COMMIT_BRANCH == "master"
-  allow_failure: true
-
 lint:
   stage: lint
   image: python:3.13-slim
