@@ -8,7 +8,7 @@ import pytest
 import time
 from unittest.mock import patch
 
-from zsh_tool.server import CircuitBreaker, CircuitState
+from zsh_tool.neverhang import CircuitBreaker, CircuitState
 from zsh_tool.config import NEVERHANG_FAILURE_THRESHOLD, NEVERHANG_RECOVERY_TIMEOUT, NEVERHANG_SAMPLE_WINDOW
 
 
