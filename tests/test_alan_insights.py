@@ -9,10 +9,8 @@ import tempfile
 import time
 from pathlib import Path
 
-import sys
-sys.path.insert(0, str(Path(__file__).parent.parent / "zsh_tool"))
-
-from server import ALAN, ALAN_RECENT_WINDOW_MINUTES, ALAN_STREAK_THRESHOLD
+from zsh_tool.server import ALAN
+from zsh_tool.config import ALAN_RECENT_WINDOW_MINUTES, ALAN_STREAK_THRESHOLD
 
 
 @pytest.fixture

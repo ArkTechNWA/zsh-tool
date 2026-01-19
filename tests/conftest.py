@@ -10,13 +10,9 @@ import os
 import signal
 from pathlib import Path
 
-import sys
-sys.path.insert(0, str(Path(__file__).parent.parent / "zsh_tool"))
-
-
 def _cleanup_tasks_sync():
     """Synchronous cleanup of live tasks."""
-    from server import live_tasks
+    from zsh_tool.server import live_tasks
 
     for task_id, task in list(live_tasks.items()):
         try:

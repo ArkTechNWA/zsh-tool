@@ -9,10 +9,7 @@ import asyncio
 import time
 from pathlib import Path
 
-import sys
-sys.path.insert(0, str(Path(__file__).parent.parent / "zsh_tool"))
-
-from server import (
+from zsh_tool.server import (
     LiveTask, live_tasks, _cleanup_task,
     poll_task, send_to_task, kill_task, list_tasks,
     execute_zsh_yielding, execute_zsh_pty,

@@ -8,11 +8,8 @@ import pytest
 import time
 from unittest.mock import patch
 
-import sys
-from pathlib import Path
-sys.path.insert(0, str(Path(__file__).parent.parent / "zsh_tool"))
-
-from server import CircuitBreaker, CircuitState, NEVERHANG_FAILURE_THRESHOLD, NEVERHANG_RECOVERY_TIMEOUT, NEVERHANG_SAMPLE_WINDOW
+from zsh_tool.server import CircuitBreaker, CircuitState
+from zsh_tool.config import NEVERHANG_FAILURE_THRESHOLD, NEVERHANG_RECOVERY_TIMEOUT, NEVERHANG_SAMPLE_WINDOW
 
 
 @pytest.fixture

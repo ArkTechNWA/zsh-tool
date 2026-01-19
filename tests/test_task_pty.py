@@ -10,10 +10,7 @@ import time
 import os
 from pathlib import Path
 
-import sys
-sys.path.insert(0, str(Path(__file__).parent.parent / "zsh_tool"))
-
-from server import (
+from zsh_tool.server import (
     LiveTask, live_tasks,
     execute_zsh_pty, circuit_breaker, CircuitState
 )

@@ -10,10 +10,7 @@ import time
 import json
 from pathlib import Path
 
-import sys
-sys.path.insert(0, str(Path(__file__).parent.parent / "zsh_tool"))
-
-from server import (
+from zsh_tool.server import (
     _handle_tool_call, _format_task_output, call_tool,
     live_tasks, LiveTask, circuit_breaker, CircuitState, alan
 )

@@ -10,14 +10,11 @@ import time
 from pathlib import Path
 from dataclasses import fields
 
-import sys
-sys.path.insert(0, str(Path(__file__).parent.parent / "zsh_tool"))
-
-from server import (
+from zsh_tool.server import (
     LiveTask, live_tasks, _cleanup_task, _build_task_response,
-    execute_zsh_yielding, NEVERHANG_TIMEOUT_DEFAULT, NEVERHANG_TIMEOUT_MAX,
-    YIELD_AFTER_DEFAULT, circuit_breaker, CircuitState
+    execute_zsh_yielding, circuit_breaker, CircuitState
 )
+from zsh_tool.config import NEVERHANG_TIMEOUT_DEFAULT, NEVERHANG_TIMEOUT_MAX, YIELD_AFTER_DEFAULT
 
 
 class TestLiveTaskDataclass:

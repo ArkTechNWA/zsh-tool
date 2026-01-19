@@ -8,10 +8,7 @@ import pytest
 import tempfile
 from pathlib import Path
 
-# Import the ALAN class
-import sys
-sys.path.insert(0, str(Path(__file__).parent.parent / "zsh_tool"))
-from server import ALAN
+from zsh_tool.server import ALAN
 
 
 @pytest.fixture

@@ -10,10 +10,8 @@ import time
 from pathlib import Path
 from unittest.mock import patch
 
-import sys
-sys.path.insert(0, str(Path(__file__).parent.parent / "zsh_tool"))
-
-from server import ALAN, ALAN_RECENT_WINDOW_MINUTES
+from zsh_tool.server import ALAN
+from zsh_tool.config import ALAN_RECENT_WINDOW_MINUTES
 
 
 @pytest.fixture
