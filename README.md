@@ -14,7 +14,7 @@
 
 Zsh execution tool for Claude Code with full Bash parity, yield-based oversight, PTY mode, NEVERHANG circuit breaker, and A.L.A.N. short-term learning.
 
-**Status:** Beta (v0.4.6)
+**Status:** Beta (v0.4.75)
 
 **Author:** Claude + Meldrey
 
@@ -89,6 +89,7 @@ Intelligent short-term learning — *"Maybe you're fuckin' up, maybe you're doin
 - **Session Memory** — 15-minute rolling window tracks recent activity
 - **Temporal Decay** — exponential decay (24h half-life), auto-prunes
 - **SSH Intelligence** — separates host connectivity from remote command success
+- **Pipeline Segment Tracking** — when `cat foo | grep -badopts | sort` fails, A.L.A.N. knows *which* segment failed
 
 #### SSH Tracking
 A.L.A.N. treats SSH commands specially, recording two separate observations:
@@ -217,6 +218,15 @@ To use zsh as the only shell, add to `~/.claude/settings.json`:
 ---
 
 ## Changelog
+
+### 0.4.75
+**Pipeline Intelligence** — *Know which segment of your pipeline is failing*
+- A.L.A.N. now captures zsh's `$pipestatus` array for every pipeline
+- Each segment recorded as independent observation with its own exit code
+- When `cat foo | grep -badopts | sort` fails, you know *grep* was the problem
+- Quote/escape-aware pipeline parsing handles complex commands correctly
+- Backwards compatible: full pipeline still recorded alongside segments
+- 248 new test lines covering segment tracking and edge cases
 
 ### 0.4.6
 **Configuration & Polish** — *User-configurable defaults, 91% coverage*
