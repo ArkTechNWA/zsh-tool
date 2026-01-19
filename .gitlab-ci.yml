@@ -1,6 +1,10 @@
 # GitLab CI: Test, Lint, and Sync
 # Real CI that actually checks code quality
 
+include:
+  - project: 'johnny5/ci-utils'
+    file: '/templates/failure-issue.yml'
+
 stages:
   - test
   - lint
@@ -47,10 +51,23 @@ test:
 version-check:
   stage: lint
   image: python:3.13-slim
+  extends: .failure-issue
   script:
     - python scripts/version-check.py
   rules:
     - if: $CI_COMMIT_BRANCH  # All branches
+
+# Temporary: Test failure-issue integration (remove after testing)
+test-failure-issue:
+  stage: lint
+  image: alpine:latest
+  extends: .failure-issue
+  script:
+    - echo "This job will fail intentionally"
+    - exit 1
+  rules:
+    - if: $CI_COMMIT_BRANCH == "master"
+  allow_failure: true
 
 lint:
   stage: lint
