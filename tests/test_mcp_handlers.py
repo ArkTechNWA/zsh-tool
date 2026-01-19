@@ -19,7 +19,7 @@ class TestFormatTaskOutput:
 
     def test_returns_text_content_list(self):
         """Returns list of TextContent."""
-        result = {'status': 'completed', 'task_id': 'abc123', 'exit_code': 0}
+        result = {'status': 'completed', 'task_id': 'abc123', 'exit_codes': '[echo:0]'}
         output = _format_task_output(result)
         assert isinstance(output, list)
         assert all(isinstance(tc, TextContent) for tc in output)
@@ -76,12 +76,12 @@ class TestFormatTaskOutput:
             'status': 'completed',
             'task_id': 'done123',
             'elapsed_seconds': 2.3,
-            'exit_code': 0
+            'exit_codes': '[echo:0]'
         }
         output = _format_task_output(result)
         text = output[0].text
         assert '[COMPLETED' in text
-        assert 'exit=0' in text
+        assert 'exit=[echo:0]' in text
 
     def test_completed_failure_format(self):
         """Completed with non-zero exit has correct format."""
@@ -89,10 +89,10 @@ class TestFormatTaskOutput:
             'status': 'completed',
             'task_id': 'fail123',
             'elapsed_seconds': 1.0,
-            'exit_code': 1
+            'exit_codes': '[false:1]'
         }
         output = _format_task_output(result)
-        assert 'exit=1' in output[0].text
+        assert 'exit=[false:1]' in output[0].text
 
     def test_timeout_status_format(self):
         """Timeout status has correct format."""
@@ -444,7 +444,7 @@ class TestOutputCombinations:
             'status': 'completed',
             'task_id': 'all',
             'elapsed_seconds': 1.0,
-            'exit_code': 0,
+            'exit_codes': '[cmd:0]',
             'warnings': ['Test warning']
         }
         output = _format_task_output(result)

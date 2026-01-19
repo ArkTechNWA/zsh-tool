@@ -264,11 +264,8 @@ def _format_task_output(result: dict) -> list[TextContent]:
         parts.append(f"[RUNNING task_id={task_id} elapsed={elapsed}s stdin={'yes' if has_stdin else 'no'}]")
         parts.append("Use zsh_poll to continue, zsh_send to input, zsh_kill to stop.")
     elif status == "completed":
-        exit_code = result.get('exit_code', 0)
-        if exit_code == 0:
-            parts.append(f"[COMPLETED task_id={task_id} elapsed={elapsed}s exit=0]")
-        else:
-            parts.append(f"[COMPLETED task_id={task_id} elapsed={elapsed}s exit={exit_code}]")
+        exit_codes = result.get('exit_codes', '[unknown:-1]')
+        parts.append(f"[COMPLETED task_id={task_id} elapsed={elapsed}s exit={exit_codes}]")
     elif status == "timeout":
         parts.append(f"[TIMEOUT task_id={task_id} elapsed={elapsed}s]")
     elif status == "killed":

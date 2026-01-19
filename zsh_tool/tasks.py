@@ -28,6 +28,47 @@ from .neverhang import CircuitBreaker
 from .alan import ALAN, _wrap_for_pipestatus, _extract_pipestatus
 
 
+def _format_exit_codes(command: str, pipestatus: list[int] | None, fallback_code: int = 0) -> str:
+    """Format exit codes as '[cmd1:0,cmd2:1]' string (Issue #27).
+
+    Args:
+        command: Original command string (may contain pipes)
+        pipestatus: List of exit codes from zsh pipestatus
+        fallback_code: Exit code to use if pipestatus unavailable
+
+    Returns:
+        Formatted string like "[cat:0,grep:1,sort:0]"
+    """
+    # Split command by pipe to get segments
+    segments = [seg.strip() for seg in command.split('|')]
+
+    if pipestatus is None:
+        # No pipestatus available, use fallback for single segment
+        pipestatus = [fallback_code]
+
+    # Pad pipestatus if segments don't match (shouldn't happen, but be safe)
+    while len(pipestatus) < len(segments):
+        pipestatus.append(-1)
+
+    # Truncate segments to match pipestatus length
+    segments = segments[:len(pipestatus)]
+
+    # Build formatted string
+    pairs = [f"{seg}:{code}" for seg, code in zip(segments, pipestatus)]
+    return f"[{','.join(pairs)}]"
+
+
+def _exit_codes_success(exit_codes: str | None) -> bool:
+    """Check if all exit codes indicate success (all zeros)."""
+    if not exit_codes:
+        return True
+    # Parse "[cmd:0,cmd:1]" format - success if all codes are 0
+    # Extract just the numbers after colons
+    import re
+    codes = re.findall(r':(-?\d+)', exit_codes)
+    return all(int(c) == 0 for c in codes)
+
+
 # Global instances
 alan = ALAN(ALAN_DB_PATH)
 circuit_breaker = CircuitBreaker()
@@ -44,7 +85,7 @@ class LiveTask:
     output_buffer: str = ""
     output_read_pos: int = 0  # How much output has been returned to caller
     status: str = "running"  # running, completed, timeout, killed, error
-    exit_code: Optional[int] = None
+    exit_codes: Optional[str] = None  # Format: "[cmd1:0,cmd2:1]" (Issue #27)
     error: Optional[str] = None
     # PTY mode fields
     is_pty: bool = False
@@ -111,21 +152,27 @@ async def _output_collector(task: LiveTask):
                 await asyncio.sleep(0.01)
                 continue
 
-        # Process completed
-        if task.status == "running":
-            task.status = "completed"
-            task.exit_code = task.process.returncode
-            circuit_breaker.record_success()
-
-        # Extract pipestatus from output (Issue #20)
+        # Extract pipestatus from output (Issue #20, #27)
         clean_output, pipestatus = _extract_pipestatus(task.output_buffer)
         task.output_buffer = clean_output  # Strip marker from visible output
 
-        # Record in A.L.A.N.
+        # Format exit codes as "[cmd:code,...]" (Issue #27)
+        fallback_code = task.process.returncode if task.process.returncode is not None else -1
+        task.exit_codes = _format_exit_codes(task.command, pipestatus, fallback_code)
+
+        # Process completed
+        if task.status == "running":
+            task.status = "completed"
+            if _exit_codes_success(task.exit_codes):
+                circuit_breaker.record_success()
+            # Note: we don't record failure to circuit breaker for normal command failures
+
+        # Record in A.L.A.N. - use first pipestatus value or fallback
         duration_ms = int((time.time() - task.started_at) * 1000)
+        primary_exit = pipestatus[0] if pipestatus else fallback_code
         alan.record(
             task.command,
-            task.exit_code if task.exit_code is not None else -1,
+            primary_exit,
             duration_ms,
             task.status == "timeout",
             clean_output[:500],
@@ -141,21 +188,20 @@ async def _output_collector(task: LiveTask):
 
 async def _pty_output_collector(task: LiveTask):
     """Background coroutine that collects output from a PTY."""
+    fallback_code = 0  # Track process exit for fallback
     try:
         while True:
             # Check if process is still running
             try:
                 pid_result = os.waitpid(task.process, os.WNOHANG)
                 if pid_result[0] != 0:
-                    # Process exited
-                    task.exit_code = os.WEXITSTATUS(pid_result[1]) if os.WIFEXITED(pid_result[1]) else -1
+                    # Process exited - capture for fallback
+                    fallback_code = os.WEXITSTATUS(pid_result[1]) if os.WIFEXITED(pid_result[1]) else -1
                     task.status = "completed"
-                    circuit_breaker.record_success()
                     break
             except ChildProcessError:
                 # Process already reaped
                 task.status = "completed"
-                task.exit_code = 0
                 break
 
             # Check timeout
@@ -197,15 +243,23 @@ async def _pty_output_collector(task: LiveTask):
         except (OSError, IOError):
             pass
 
-        # Extract pipestatus from output (Issue #20)
+        # Extract pipestatus from output (Issue #20, #27)
         clean_output, pipestatus = _extract_pipestatus(task.output_buffer)
         task.output_buffer = clean_output  # Strip marker from visible output
 
-        # Record in A.L.A.N.
+        # Format exit codes as "[cmd:code,...]" (Issue #27)
+        task.exit_codes = _format_exit_codes(task.command, pipestatus, fallback_code)
+
+        # Record success to circuit breaker if all codes are 0
+        if task.status == "completed" and _exit_codes_success(task.exit_codes):
+            circuit_breaker.record_success()
+
+        # Record in A.L.A.N. - use first pipestatus value or fallback
         duration_ms = int((time.time() - task.started_at) * 1000)
+        primary_exit = pipestatus[0] if pipestatus else fallback_code
         alan.record(
             task.command,
-            task.exit_code if task.exit_code is not None else -1,
+            primary_exit,
             duration_ms,
             task.status == "timeout",
             clean_output[:500],
@@ -374,8 +428,8 @@ def _build_task_response(task: LiveTask, warnings: list = None) -> dict:
         result['is_pty'] = task.is_pty
         result['message'] = f"Command running ({elapsed:.1f}s). Use zsh_poll to get more output, zsh_send to send input."
     elif task.status == "completed":
-        result['success'] = task.exit_code == 0
-        result['exit_code'] = task.exit_code
+        result['success'] = _exit_codes_success(task.exit_codes)
+        result['exit_codes'] = task.exit_codes  # Format: "[cmd:0,cmd:1]" (Issue #27)
         _cleanup_task(task.task_id)
     elif task.status == "timeout":
         result['success'] = False

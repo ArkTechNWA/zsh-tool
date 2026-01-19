@@ -45,7 +45,7 @@ class TestLiveTaskDataclass:
         assert task.output_buffer == ""
         assert task.output_read_pos == 0
         assert task.status == "running"
-        assert task.exit_code is None
+        assert task.exit_codes is None
         assert task.error is None
         assert task.is_pty is False
         assert task.pty_fd is None
@@ -55,7 +55,7 @@ class TestLiveTaskDataclass:
         field_names = {f.name for f in fields(LiveTask)}
         expected = {
             'task_id', 'command', 'process', 'started_at', 'timeout',
-            'output_buffer', 'output_read_pos', 'status', 'exit_code',
+            'output_buffer', 'output_read_pos', 'status', 'exit_codes',
             'error', 'is_pty', 'pty_fd'
         }
         assert expected.issubset(field_names)
@@ -129,7 +129,7 @@ class TestBuildTaskResponse:
             started_at=time.time(),
             timeout=60,
             status="completed",
-            exit_code=0
+            exit_codes="[echo hello:0]"
         )
         response = _build_task_response(task, [])
         assert response['task_id'] == "resp_test"
@@ -174,7 +174,7 @@ class TestBuildTaskResponse:
         assert response['warnings'] == warnings
 
     def test_response_success_based_on_exit_code(self):
-        """Response success based on exit code."""
+        """Response success based on exit codes."""
         task_success = LiveTask(
             task_id="test",
             command="echo",
@@ -182,7 +182,7 @@ class TestBuildTaskResponse:
             started_at=time.time(),
             timeout=60,
             status="completed",
-            exit_code=0
+            exit_codes="[echo:0]"
         )
         task_fail = LiveTask(
             task_id="test2",
@@ -191,7 +191,7 @@ class TestBuildTaskResponse:
             started_at=time.time(),
             timeout=60,
             status="completed",
-            exit_code=1
+            exit_codes="[false:1]"
         )
         resp_success = _build_task_response(task_success, [])
         resp_fail = _build_task_response(task_fail, [])
@@ -294,7 +294,7 @@ class TestExecuteZshYielding:
             assert "captured" in task.output_buffer or "captured" in result.get('output', '')
 
     async def test_exit_code_captured(self):
-        """Exit code is captured for completed command."""
+        """Exit codes are captured for completed command."""
         circuit_breaker.state = CircuitState.CLOSED
         circuit_breaker.failures = []
 
@@ -304,7 +304,8 @@ class TestExecuteZshYielding:
         await asyncio.sleep(0.5)
 
         if result['status'] == 'completed':
-            assert result.get('exit_code') == 0
+            # exit_codes format: "[exit 0:0]"
+            assert ':0]' in result.get('exit_codes', '')
 
     async def test_timeout_enforced(self):
         """Timeout is enforced."""
