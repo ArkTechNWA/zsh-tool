@@ -13,7 +13,7 @@
 
 Zsh execution tool for Claude Code with full Bash parity, yield-based oversight, PTY mode, NEVERHANG circuit breaker, and A.L.A.N. short-term learning.
 
-**Status:** Beta (v0.4.80)
+**Status:** Beta (v0.4.81)
 
 **Author:** Claude + Meldrey
 
@@ -217,6 +217,13 @@ To use zsh as the only shell, add to `~/.claude/settings.json`:
 ---
 
 ## Changelog
+
+### 0.4.81
+**Pipestatus Marker Leak Fix** — *Data integrity*
+- Fixed race condition where `___ZSH_PIPESTATUS_MARKER___` could leak into output
+- Marker now stripped in `_build_task_response()` before returning to caller
+- Prevents corrupted file content when output is captured mid-execution
+- CI: Runner switched to docker executor, added PEP 668 compliance
 
 ### 0.4.80
 **Per-Segment Exit Codes** — *Know exactly which command failed*
