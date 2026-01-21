@@ -406,9 +406,17 @@ async def execute_zsh_yielding(
 
 def _build_task_response(task: LiveTask, warnings: list = None) -> dict:
     """Build response dict from task state."""
+    from .config import PIPESTATUS_MARKER
+
     # Get new output since last read
     new_output = task.output_buffer[task.output_read_pos:]
     task.output_read_pos = len(task.output_buffer)
+
+    # Strip pipestatus marker from output to prevent leaking (Issue #29)
+    # The marker may be in output_buffer before _output_collector finishes extraction
+    if PIPESTATUS_MARKER in new_output:
+        lines = new_output.split('\n')
+        new_output = '\n'.join(line for line in lines if PIPESTATUS_MARKER not in line)
 
     # Truncate if needed
     if len(new_output) > TRUNCATE_OUTPUT_AT:

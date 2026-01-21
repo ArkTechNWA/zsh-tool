@@ -251,6 +251,46 @@ class TestBuildTaskResponse:
         assert response.get('error') == "Something went wrong"
         assert "error_test" not in live_tasks  # Cleaned up
 
+    def test_pipestatus_marker_stripped_from_output(self):
+        """Pipestatus marker is stripped from output (Issue #29)."""
+        from zsh_tool.config import PIPESTATUS_MARKER
+
+        # Simulate output buffer containing the marker (race condition scenario)
+        task = LiveTask(
+            task_id="marker_test",
+            command="cat file.txt",
+            process=None,
+            started_at=time.time(),
+            timeout=60,
+            status="running",
+            output_buffer=f"actual content\nline two\n{PIPESTATUS_MARKER}:0\n"
+        )
+        response = _build_task_response(task, [])
+
+        # Marker should be stripped from output
+        assert PIPESTATUS_MARKER not in response['output']
+        assert "actual content" in response['output']
+        assert "line two" in response['output']
+
+    def test_pipestatus_marker_partial_line_stripped(self):
+        """Pipestatus marker in partial output is stripped (Issue #29)."""
+        from zsh_tool.config import PIPESTATUS_MARKER
+
+        # Marker might appear without trailing newline
+        task = LiveTask(
+            task_id="partial_test",
+            command="echo test",
+            process=None,
+            started_at=time.time(),
+            timeout=60,
+            status="running",
+            output_buffer=f"output here\n{PIPESTATUS_MARKER}:0"
+        )
+        response = _build_task_response(task, [])
+
+        assert PIPESTATUS_MARKER not in response['output']
+        assert "output here" in response['output']
+
 
 @pytest.mark.asyncio
 class TestExecuteZshYielding:
