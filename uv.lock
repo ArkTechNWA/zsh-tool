@@ -897,7 +897,7 @@ wheels = [
 
 [[package]]
 name = "zsh-tool-mcp"
-version = "0.4.79"
+version = "0.4.80"
 source = { editable = "." }
 dependencies = [
     { name = "anyio" },
