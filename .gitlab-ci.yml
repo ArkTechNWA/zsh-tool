@@ -30,8 +30,8 @@ test:
   before_script:
     - apt-get update && apt-get install -y zsh
     - python -m pip install --upgrade pip
-    - pip install pytest pytest-cov pytest-asyncio
-    - pip install -e .
+    - pip install pytest pytest-cov pytest-asyncio --break-system-packages
+    - pip install -e . --break-system-packages
   script:
     - python -m pytest tests/ -v --cov=zsh_tool --cov-report=term --cov-report=xml:coverage.xml
   coverage: '/TOTAL.*\s+(\d+%)/'
@@ -61,7 +61,7 @@ lint:
   stage: lint
   image: python:3.13-slim
   before_script:
-    - pip install ruff
+    - pip install ruff --break-system-packages
   script:
     - ruff check zsh_tool/ --output-format=gitlab > ruff-report.json || true
     - ruff check zsh_tool/ --statistics
@@ -82,7 +82,7 @@ publish-pypi:
   stage: publish
   image: python:3.13-slim
   before_script:
-    - pip install build twine
+    - pip install build twine --break-system-packages
   script:
     - python -m build
     - twine upload dist/* --non-interactive
