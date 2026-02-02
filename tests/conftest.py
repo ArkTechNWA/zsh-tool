@@ -5,7 +5,6 @@ Handles async test cleanup to prevent resource warnings.
 """
 
 import pytest
-import asyncio
 import os
 import signal
 
@@ -73,7 +72,3 @@ def cleanup_live_tasks_sync(request):
     _cleanup_tasks_sync()
 
 
-@pytest.fixture
-def event_loop_policy():
-    """Use default event loop policy."""
-    return asyncio.DefaultEventLoopPolicy()

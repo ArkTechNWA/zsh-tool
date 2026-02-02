@@ -9,11 +9,11 @@
 [![CI/CD](https://img.shields.io/gitlab/pipeline-status/arktechnwa%2Fmcp%2Fzsh-tool?branch=master&gitlab_url=https%3A%2F%2Fgitlab.arktechnwa.com&label=CI%2FCD)](https://gitlab.arktechnwa.com/arktechnwa/mcp/zsh-tool/-/pipelines)
 [![coverage](https://img.shields.io/gitlab/pipeline-coverage/arktechnwa%2Fmcp%2Fzsh-tool?branch=master&gitlab_url=https%3A%2F%2Fgitlab.arktechnwa.com)](https://gitlab.arktechnwa.com/arktechnwa/mcp/zsh-tool/-/pipelines)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Python 3.13](https://img.shields.io/badge/python-3.13-blue.svg)](https://www.python.org/)
+[![Python 3.14](https://img.shields.io/badge/python-3.14-blue.svg)](https://www.python.org/)
 
 Zsh execution tool for Claude Code with full Bash parity, yield-based oversight, PTY mode, NEVERHANG circuit breaker, and A.L.A.N. short-term learning.
 
-**Status:** Beta (v0.4.81)
+**Status:** Beta (v0.4.82)
 
 **Author:** Claude + Meldrey
 
@@ -217,6 +217,12 @@ To use zsh as the only shell, add to `~/.claude/settings.json`:
 ---
 
 ## Changelog
+
+### 0.4.82
+**Python 3.14 Support** — *Future-proofing*
+- Added Python 3.14 classifier and badge
+- Removed deprecated `asyncio.DefaultEventLoopPolicy` fixture (slated for removal in 3.16)
+- All 331 tests pass on Python 3.14.2
 
 ### 0.4.81
 **Pipestatus Marker Leak Fix** — *Data integrity*

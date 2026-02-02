@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "zsh-tool-mcp"
-version = "0.4.81"
+version = "0.4.82"
 description = "Zsh for Claude Code. PTY mode lets Claude type passwords. NEVERHANG + A.L.A.N."
 readme = "README.md"
 license = {text = "MIT"}
@@ -23,6 +23,7 @@ classifiers = [
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Topic :: System :: Shells",
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
