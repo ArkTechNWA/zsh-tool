@@ -61,7 +61,7 @@ def _extract_pipestatus(output: str) -> tuple[str, list[int] | None]:
         return output, None
 
     # Strip the marker line from output
-    clean_output = output[:line_start] + output[line_end + 1:] if line_end < len(output) else output[:line_start].rstrip('\n')
+    clean_output = output[:marker_pos] + output[line_end + 1:] if line_end < len(output) else output[:marker_pos]
 
     return clean_output, pipestatus
 
