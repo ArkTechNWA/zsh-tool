@@ -478,6 +478,25 @@ class TestPipestatusHelpers:
         clean, pipestatus = _extract_pipestatus(output)
         assert pipestatus is None
 
+    def test_extract_pipestatus_no_trailing_newline(self):
+        """Output without trailing newline before marker is preserved (Issue #41)."""
+        from zsh_tool.alan import _extract_pipestatus
+        from zsh_tool.config import PIPESTATUS_MARKER
+        # curl -s ifconfig.me outputs IP without trailing newline
+        output = f"153.66.73.228{PIPESTATUS_MARKER}:0\n"
+        clean, pipestatus = _extract_pipestatus(output)
+        assert clean == "153.66.73.228"
+        assert pipestatus == [0]
+
+    def test_extract_pipestatus_no_trailing_newline_pipeline(self):
+        """Pipeline output without trailing newline preserves output (Issue #41)."""
+        from zsh_tool.alan import _extract_pipestatus
+        from zsh_tool.config import PIPESTATUS_MARKER
+        output = f"result{PIPESTATUS_MARKER}:0 1\n"
+        clean, pipestatus = _extract_pipestatus(output)
+        assert clean == "result"
+        assert pipestatus == [0, 1]
+
 
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])
