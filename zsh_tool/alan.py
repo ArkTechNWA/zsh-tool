@@ -45,8 +45,7 @@ def _extract_pipestatus(output: str) -> tuple[str, list[int] | None]:
     if marker_pos == -1:
         return output, None
 
-    # Find the line containing the marker
-    line_start = output.rfind('\n', 0, marker_pos) + 1
+    # Find the end of the marker line
     line_end = output.find('\n', marker_pos)
     if line_end == -1:
         line_end = len(output)
