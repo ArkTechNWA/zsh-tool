@@ -13,7 +13,7 @@
 
 Zsh execution tool for Claude Code with full Bash parity, yield-based oversight, PTY mode, NEVERHANG circuit breaker, and A.L.A.N. short-term learning.
 
-**Status:** Beta (v0.4.82)
+**Status:** Beta (v0.4.83)
 
 **Author:** Claude + Meldrey
 
@@ -218,7 +218,7 @@ To use zsh as the only shell, add to `~/.claude/settings.json`:
 
 ## Changelog
 
-### 0.4.82
+### 0.4.83
 **Python 3.14 Support** — *Future-proofing*
 - Added Python 3.14 classifier and badge
 - Removed deprecated `asyncio.DefaultEventLoopPolicy` fixture (slated for removal in 3.16)
