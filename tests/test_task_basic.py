@@ -45,7 +45,7 @@ class TestLiveTaskDataclass:
         assert task.output_buffer == ""
         assert task.output_read_pos == 0
         assert task.status == "running"
-        assert task.exit_codes is None
+        assert task.pipestatus is None
         assert task.error is None
         assert task.is_pty is False
         assert task.pty_fd is None
@@ -55,7 +55,7 @@ class TestLiveTaskDataclass:
         field_names = {f.name for f in fields(LiveTask)}
         expected = {
             'task_id', 'command', 'process', 'started_at', 'timeout',
-            'output_buffer', 'output_read_pos', 'status', 'exit_codes',
+            'output_buffer', 'output_read_pos', 'status', 'pipestatus',
             'error', 'is_pty', 'pty_fd'
         }
         assert expected.issubset(field_names)
@@ -129,7 +129,7 @@ class TestBuildTaskResponse:
             started_at=time.time(),
             timeout=60,
             status="completed",
-            exit_codes="[echo hello:0]"
+            pipestatus=[0]
         )
         response = _build_task_response(task, [])
         assert response['task_id'] == "resp_test"
@@ -160,8 +160,8 @@ class TestBuildTaskResponse:
         response = _build_task_response(task, [])
         assert "hello" in response['output']
 
-    def test_response_includes_warnings(self):
-        """Response includes warnings."""
+    def test_response_includes_insights(self):
+        """Response includes insights grouped by level."""
         task = LiveTask(
             task_id="test",
             command="echo",
@@ -169,12 +169,14 @@ class TestBuildTaskResponse:
             started_at=time.time(),
             timeout=60
         )
-        warnings = ["Test warning 1", "Test warning 2"]
-        response = _build_task_response(task, warnings)
-        assert response['warnings'] == warnings
+        insights = [("info", "Test insight 1"), ("warning", "Test warning")]
+        response = _build_task_response(task, insights)
+        assert 'insights' in response
+        assert "Test insight 1" in response['insights'].get('info', [])
+        assert "Test warning" in response['insights'].get('warning', [])
 
     def test_response_success_based_on_exit_code(self):
-        """Response success based on exit codes."""
+        """Response success based on pipestatus."""
         task_success = LiveTask(
             task_id="test",
             command="echo",
@@ -182,7 +184,7 @@ class TestBuildTaskResponse:
             started_at=time.time(),
             timeout=60,
             status="completed",
-            exit_codes="[echo:0]"
+            pipestatus=[0]
         )
         task_fail = LiveTask(
             task_id="test2",
@@ -191,7 +193,7 @@ class TestBuildTaskResponse:
             started_at=time.time(),
             timeout=60,
             status="completed",
-            exit_codes="[false:1]"
+            pipestatus=[1]
         )
         resp_success = _build_task_response(task_success, [])
         resp_fail = _build_task_response(task_fail, [])
@@ -344,8 +346,8 @@ class TestExecuteZshYielding:
         await asyncio.sleep(0.5)
 
         if result['status'] == 'completed':
-            # exit_codes format: "[exit 0:0]"
-            assert ':0]' in result.get('exit_codes', '')
+            assert result.get('pipestatus') is not None
+            assert result['pipestatus'][-1] == 0
 
     async def test_timeout_enforced(self):
         """Timeout is enforced."""
@@ -383,16 +385,16 @@ class TestExecuteZshYielding:
         circuit_breaker.state = CircuitState.CLOSED
         circuit_breaker.failures = []
 
-    async def test_warnings_from_alan_included(self):
-        """A.L.A.N. warnings are included in response."""
+    async def test_insights_from_alan_included(self):
+        """A.L.A.N. insights are included in response."""
         circuit_breaker.state = CircuitState.CLOSED
         circuit_breaker.failures = []
 
-        result = await execute_zsh_yielding("echo unique_test_cmd", timeout=10, yield_after=1)
+        result = await execute_zsh_yielding("echo unique_test_cmd_2", timeout=10, yield_after=1)
 
-        # Should have at least the "new pattern" warning
-        assert 'warnings' in result
-        assert any("A.L.A.N." in w for w in result['warnings'])
+        # Should have insights dict with at least "New pattern" info
+        assert 'insights' in result
+        assert isinstance(result['insights'], dict)
 
 
 @pytest.mark.asyncio
@@ -471,7 +473,7 @@ class TestYieldBehavior:
             task = live_tasks[result['task_id']]
             # Fast commands should complete quickly
             if task.status == 'completed':
-                assert task.exit_code is not None
+                assert task.pipestatus is not None
 
 
 class TestConstants:

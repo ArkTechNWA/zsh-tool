@@ -28,45 +28,11 @@ from .neverhang import CircuitBreaker
 from .alan import ALAN, _wrap_for_pipestatus, _extract_pipestatus
 
 
-def _format_exit_codes(command: str, pipestatus: list[int] | None, fallback_code: int = 0) -> str:
-    """Format exit codes as '[cmd1:0,cmd2:1]' string (Issue #27).
-
-    Args:
-        command: Original command string (may contain pipes)
-        pipestatus: List of exit codes from zsh pipestatus
-        fallback_code: Exit code to use if pipestatus unavailable
-
-    Returns:
-        Formatted string like "[cat:0,grep:1,sort:0]"
-    """
-    # Split command by pipe to get segments
-    segments = [seg.strip() for seg in command.split('|')]
-
-    if pipestatus is None:
-        # No pipestatus available, use fallback for single segment
-        pipestatus = [fallback_code]
-
-    # Pad pipestatus if segments don't match (shouldn't happen, but be safe)
-    while len(pipestatus) < len(segments):
-        pipestatus.append(-1)
-
-    # Truncate segments to match pipestatus length
-    segments = segments[:len(pipestatus)]
-
-    # Build formatted string
-    pairs = [f"{seg}:{code}" for seg, code in zip(segments, pipestatus)]
-    return f"[{','.join(pairs)}]"
-
-
-def _exit_codes_success(exit_codes: str | None) -> bool:
-    """Check if all exit codes indicate success (all zeros)."""
-    if not exit_codes:
+def _pipestatus_success(pipestatus: list[int] | None) -> bool:
+    """Check if overall exit is success (last segment is 0)."""
+    if not pipestatus:
         return True
-    # Parse "[cmd:0,cmd:1]" format - success if all codes are 0
-    # Extract just the numbers after colons
-    import re
-    codes = re.findall(r':(-?\d+)', exit_codes)
-    return all(int(c) == 0 for c in codes)
+    return pipestatus[-1] == 0
 
 
 # Global instances
@@ -85,7 +51,7 @@ class LiveTask:
     output_buffer: str = ""
     output_read_pos: int = 0  # How much output has been returned to caller
     status: str = "running"  # running, completed, timeout, killed, error
-    exit_codes: Optional[str] = None  # Format: "[cmd1:0,cmd2:1]" (Issue #27)
+    pipestatus: Optional[list[int]] = None  # Raw exit codes per pipe segment
     error: Optional[str] = None
     # PTY mode fields
     is_pty: bool = False
@@ -156,20 +122,20 @@ async def _output_collector(task: LiveTask):
         clean_output, pipestatus = _extract_pipestatus(task.output_buffer)
         task.output_buffer = clean_output  # Strip marker from visible output
 
-        # Format exit codes as "[cmd:code,...]" (Issue #27)
-        fallback_code = task.process.returncode if task.process.returncode is not None else -1
-        task.exit_codes = _format_exit_codes(task.command, pipestatus, fallback_code)
+        # Store raw pipestatus
+        fallback_code = task.process.returncode if task.process.returncode is not None else 0
+        task.pipestatus = pipestatus if pipestatus else [fallback_code]
 
         # Process completed
         if task.status == "running":
             task.status = "completed"
-            if _exit_codes_success(task.exit_codes):
+            if _pipestatus_success(task.pipestatus):
                 circuit_breaker.record_success()
             # Note: we don't record failure to circuit breaker for normal command failures
 
-        # Record in A.L.A.N. - use first pipestatus value or fallback
+        # Record in A.L.A.N. - use last pipestatus value (overall exit)
         duration_ms = int((time.time() - task.started_at) * 1000)
-        primary_exit = pipestatus[0] if pipestatus else fallback_code
+        primary_exit = task.pipestatus[-1]
         alan.record(
             task.command,
             primary_exit,
@@ -247,16 +213,16 @@ async def _pty_output_collector(task: LiveTask):
         clean_output, pipestatus = _extract_pipestatus(task.output_buffer)
         task.output_buffer = clean_output  # Strip marker from visible output
 
-        # Format exit codes as "[cmd:code,...]" (Issue #27)
-        task.exit_codes = _format_exit_codes(task.command, pipestatus, fallback_code)
+        # Store raw pipestatus
+        task.pipestatus = pipestatus if pipestatus else [fallback_code]
 
-        # Record success to circuit breaker if all codes are 0
-        if task.status == "completed" and _exit_codes_success(task.exit_codes):
+        # Record success to circuit breaker if overall exit is 0
+        if task.status == "completed" and _pipestatus_success(task.pipestatus):
             circuit_breaker.record_success()
 
-        # Record in A.L.A.N. - use first pipestatus value or fallback
+        # Record in A.L.A.N. - use last pipestatus value (overall exit)
         duration_ms = int((time.time() - task.started_at) * 1000)
-        primary_exit = pipestatus[0] if pipestatus else fallback_code
+        primary_exit = task.pipestatus[-1]
         alan.record(
             task.command,
             primary_exit,
@@ -285,8 +251,7 @@ async def execute_zsh_pty(
     timeout = min(timeout, NEVERHANG_TIMEOUT_MAX)
 
     # Check A.L.A.N. 2.0 for insights
-    insights = alan.get_insights(command, timeout)
-    warnings = [f"A.L.A.N.: {i}" for i in insights]
+    insights = alan.get_insights(command, timeout)  # list[tuple[str, str]]
 
     # Check NEVERHANG circuit breaker
     allowed, circuit_message = circuit_breaker.should_allow()
@@ -297,7 +262,7 @@ async def execute_zsh_pty(
             'circuit_status': circuit_breaker.get_status()
         }
     if circuit_message:
-        warnings.append(circuit_message)
+        insights.append(("warning", circuit_message))
 
     # Create task ID
     task_id = str(uuid.uuid4())[:8]
@@ -341,7 +306,7 @@ async def execute_zsh_pty(
     await asyncio.sleep(yield_after)
 
     # Check status and return
-    return _build_task_response(task, warnings)
+    return _build_task_response(task, insights)
 
 
 async def execute_zsh_yielding(
@@ -356,8 +321,7 @@ async def execute_zsh_yielding(
     timeout = min(timeout, NEVERHANG_TIMEOUT_MAX)
 
     # Check A.L.A.N. 2.0 for insights
-    insights = alan.get_insights(command, timeout)
-    warnings = [f"A.L.A.N.: {i}" for i in insights]
+    insights = alan.get_insights(command, timeout)  # list[tuple[str, str]]
 
     # Check NEVERHANG circuit breaker
     allowed, circuit_message = circuit_breaker.should_allow()
@@ -368,7 +332,7 @@ async def execute_zsh_yielding(
             'circuit_status': circuit_breaker.get_status()
         }
     if circuit_message:
-        warnings.append(circuit_message)
+        insights.append(("warning", circuit_message))
 
     # Create task
     task_id = str(uuid.uuid4())[:8]
@@ -401,12 +365,13 @@ async def execute_zsh_yielding(
     await asyncio.sleep(yield_after)
 
     # Check status and return
-    return _build_task_response(task, warnings)
+    return _build_task_response(task, insights)
 
 
-def _build_task_response(task: LiveTask, warnings: list = None) -> dict:
+def _build_task_response(task: LiveTask, insights: list[tuple[str, str]] | None = None) -> dict:
     """Build response dict from task state."""
     from .config import PIPESTATUS_MARKER
+    from .alan import get_post_insights
 
     # Get new output since last read
     new_output = task.output_buffer[task.output_read_pos:]
@@ -436,8 +401,8 @@ def _build_task_response(task: LiveTask, warnings: list = None) -> dict:
         result['is_pty'] = task.is_pty
         result['message'] = f"Command running ({elapsed:.1f}s). Use zsh_poll to get more output, zsh_send to send input."
     elif task.status == "completed":
-        result['success'] = _exit_codes_success(task.exit_codes)
-        result['exit_codes'] = task.exit_codes  # Format: "[cmd:0,cmd:1]" (Issue #27)
+        result['success'] = _pipestatus_success(task.pipestatus)
+        result['pipestatus'] = task.pipestatus
         _cleanup_task(task.task_id)
     elif task.status == "timeout":
         result['success'] = False
@@ -452,8 +417,17 @@ def _build_task_response(task: LiveTask, warnings: list = None) -> dict:
         result['error'] = task.error
         _cleanup_task(task.task_id)
 
-    if warnings:
-        result['warnings'] = warnings
+    # Build insight dict: merge pre-execution and post-execution insights
+    all_insights = list(insights or [])
+    if task.status == "completed" and task.pipestatus:
+        post = get_post_insights(task.command, task.pipestatus, new_output)
+        all_insights.extend(post)
+
+    if all_insights:
+        grouped: dict[str, list[str]] = {}
+        for level, msg in all_insights:
+            grouped.setdefault(level, []).append(msg)
+        result['insights'] = grouped
 
     return result
 

@@ -28,18 +28,26 @@ class TestGetInsights:
     def test_new_pattern_insight(self, alan):
         """New command shows 'no history' insight."""
         insights = alan.get_insights("brand-new-command")
-        assert any("New pattern" in i for i in insights)
+        assert any("New pattern" in msg for _, msg in insights)
 
     def test_returns_list(self, alan):
         """get_insights returns a list."""
         insights = alan.get_insights("ls -la")
         assert isinstance(insights, list)
 
-    def test_insight_strings(self, alan):
-        """All insights are strings."""
+    def test_insight_tuples(self, alan):
+        """All insights are (level, message) tuples."""
         alan.record("npm test", 0, 100)
         insights = alan.get_insights("npm test")
-        assert all(isinstance(i, str) for i in insights)
+        assert all(isinstance(i, tuple) and len(i) == 2 for i in insights)
+        assert all(level in ("info", "warning") for level, _msg in insights)
+
+    def test_new_pattern_is_info(self, alan):
+        """New pattern insight is classified as info."""
+        insights = alan.get_insights("brand-new-command")
+        new_pattern = [(lvl, msg) for lvl, msg in insights if "New pattern" in msg]
+        assert len(new_pattern) == 1
+        assert new_pattern[0][0] == "info"
 
 
 class TestRetryInsights:
@@ -50,7 +58,7 @@ class TestRetryInsights:
         alan.record("npm test", 0, 100)
 
         insights = alan.get_insights("npm test")
-        assert any("Retry" in i for i in insights)
+        assert any("Retry" in msg for _, msg in insights)
 
     def test_retry_all_failed_insight(self, alan):
         """Shows 'all failed' insight when all previous runs failed."""
@@ -58,7 +66,17 @@ class TestRetryInsights:
         alan.record("npm test", 1, 100)
 
         insights = alan.get_insights("npm test")
-        assert any("all failed" in i.lower() or "different approach" in i.lower() for i in insights)
+        assert any("all failed" in msg.lower() or "different approach" in msg.lower() for _, msg in insights)
+
+    def test_retry_all_failed_is_warning(self, alan):
+        """All-failed retry insight is classified as warning."""
+        alan.record("npm test", 1, 100)
+        alan.record("npm test", 1, 100)
+
+        insights = alan.get_insights("npm test")
+        failed = [(lvl, msg) for lvl, msg in insights if "all failed" in msg.lower()]
+        assert len(failed) > 0
+        assert failed[0][0] == "warning"
 
     def test_retry_all_succeeded_insight(self, alan):
         """Shows 'succeeded' insight when all previous runs succeeded."""
@@ -66,7 +84,7 @@ class TestRetryInsights:
         alan.record("npm test", 0, 100)
 
         insights = alan.get_insights("npm test")
-        assert any("succeeded" in i.lower() for i in insights)
+        assert any("succeeded" in msg.lower() for _, msg in insights)
 
     def test_retry_mixed_results_insight(self, alan):
         """Shows mixed results insight."""
@@ -76,7 +94,7 @@ class TestRetryInsights:
 
         insights = alan.get_insights("npm test")
         # Should show X/Y succeeded
-        assert any("/" in i and "succeeded" in i.lower() for i in insights)
+        assert any("/" in msg and "succeeded" in msg.lower() for _, msg in insights)
 
     def test_retry_count_in_insight(self, alan):
         """Retry number is included in insight."""
@@ -85,7 +103,7 @@ class TestRetryInsights:
 
         insights = alan.get_insights("npm test")
         # Should show "Retry #3"
-        assert any("#3" in i for i in insights)
+        assert any("#3" in msg for _, msg in insights)
 
 
 class TestSimilarCommandInsights:
@@ -99,7 +117,7 @@ class TestSimilarCommandInsights:
 
         insights = alan.get_insights("git push origin gamma")
         # Should show something about similar commands
-        assert any("similar" in i.lower() for i in insights)
+        assert any("similar" in msg.lower() for _, msg in insights)
 
     def test_similar_command_shows_success_rate(self, alan):
         """Similar command insight shows success rate."""
@@ -108,9 +126,9 @@ class TestSimilarCommandInsights:
 
         insights = alan.get_insights("git push origin gamma")
         # Should show X/Y succeeded
-        similar_insights = [i for i in insights if "similar" in i.lower()]
+        similar_insights = [msg for _, msg in insights if "similar" in msg.lower()]
         if similar_insights:
-            assert any("/" in i for i in similar_insights)
+            assert any("/" in s for s in similar_insights)
 
 
 class TestStreakInsights:
@@ -122,7 +140,7 @@ class TestStreakInsights:
             alan.record("npm test", 0, 100)
 
         insights = alan.get_insights("npm test")
-        assert any("streak" in i.lower() and "success" in i.lower() for i in insights)
+        assert any("streak" in msg.lower() and "success" in msg.lower() for _, msg in insights)
 
     def test_failure_streak_insight(self, alan):
         """Shows insight for failure streaks at threshold."""
@@ -130,7 +148,7 @@ class TestStreakInsights:
             alan.record("npm test", 1, 100)
 
         insights = alan.get_insights("npm test")
-        assert any("fail" in i.lower() and "streak" in i.lower() for i in insights)
+        assert any("fail" in msg.lower() and "streak" in msg.lower() for _, msg in insights)
 
     def test_no_streak_insight_below_threshold(self, alan):
         """No streak insight when below threshold."""
@@ -139,7 +157,7 @@ class TestStreakInsights:
 
         insights = alan.get_insights("npm test")
         # Should not have streak insight
-        streak_insights = [i for i in insights if "streak" in i.lower() and "solid" in i.lower()]
+        streak_insights = [msg for _, msg in insights if "streak" in msg.lower() and "solid" in msg.lower()]
         assert len(streak_insights) == 0
 
 
@@ -154,7 +172,7 @@ class TestPatternStatsInsights:
         alan.record("slow-command", 0, 100, timed_out=False)
 
         insights = alan.get_insights("slow-command")
-        assert any("timeout" in i.lower() for i in insights)
+        assert any("timeout" in msg.lower() for _, msg in insights)
 
     def test_reliable_pattern_insight(self, alan):
         """Shows insight for reliable patterns."""
@@ -163,7 +181,7 @@ class TestPatternStatsInsights:
             alan.record("ls -la", 0, 50)
 
         insights = alan.get_insights("ls -la")
-        assert any("reliable" in i.lower() for i in insights)
+        assert any("reliable" in msg.lower() for _, msg in insights)
 
     def test_average_duration_insight(self, alan):
         """Shows insight for average duration (>10s to trigger insight)."""
@@ -173,7 +191,7 @@ class TestPatternStatsInsights:
         alan.record("sleep-command", 0, 16000)  # 16 seconds
 
         insights = alan.get_insights("sleep-command")
-        assert any("takes" in i.lower() and "s" in i for i in insights)
+        assert any("takes" in msg.lower() and "s" in msg for _, msg in insights)
 
 
 class TestInsightCombinations:
@@ -193,7 +211,7 @@ class TestInsightCombinations:
         """New command only shows 'new pattern' insight."""
         insights = alan.get_insights("completely-new-command-never-seen")
         assert len(insights) == 1
-        assert "New pattern" in insights[0]
+        assert "New pattern" in insights[0][1]
 
 
 class TestInsightFormatting:
@@ -204,7 +222,7 @@ class TestInsightFormatting:
         alan.record("npm test", 0, 100)
 
         insights = alan.get_insights("npm test")
-        retry_insights = [i for i in insights if "Retry" in i]
+        retry_insights = [msg for _, msg in insights if "Retry" in msg]
         if retry_insights:
             # Should match pattern like "Retry #2..."
             assert retry_insights[0].startswith("Retry #")
@@ -215,7 +233,7 @@ class TestInsightFormatting:
             alan.record("npm test", 0, 100)
 
         insights = alan.get_insights("npm test")
-        streak_insights = [i for i in insights if "Streak:" in i]
+        streak_insights = [msg for _, msg in insights if "Streak:" in msg]
         if streak_insights:
             assert any(char.isdigit() for char in streak_insights[0])
 
@@ -225,7 +243,7 @@ class TestInsightFormatting:
         alan.record("slow-cmd", 0, 100, timed_out=True)
 
         insights = alan.get_insights("slow-cmd")
-        timeout_insights = [i for i in insights if "timeout" in i.lower()]
+        timeout_insights = [msg for _, msg in insights if "timeout" in msg.lower()]
         if timeout_insights:
             assert "%" in timeout_insights[0]
 
@@ -284,14 +302,14 @@ class TestNonSSHCommands:
 
         insights = alan.get_insights("npm test")
         # Should not contain SSH-specific language
-        assert not any("host" in i.lower() and "connection" in i.lower() for i in insights)
+        assert not any("host" in msg.lower() and "connection" in msg.lower() for _, msg in insights)
 
     def test_non_ssh_no_remote_command_insights(self, alan):
         """Non-SSH commands don't show remote command insights."""
         alan.record("git push", 0, 100)
 
         insights = alan.get_insights("git push")
-        assert not any("remote command" in i.lower() for i in insights)
+        assert not any("remote command" in msg.lower() for _, msg in insights)
 
 
 class TestPipelineSegmentRecording:

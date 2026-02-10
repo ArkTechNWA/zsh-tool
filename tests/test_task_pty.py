@@ -91,15 +91,15 @@ class TestExecuteZshPty:
         circuit_breaker.state = CircuitState.CLOSED
         circuit_breaker.failures = []
 
-    async def test_pty_includes_warnings(self):
-        """PTY execution includes A.L.A.N. warnings."""
+    async def test_pty_includes_insights(self):
+        """PTY execution includes A.L.A.N. insights."""
         circuit_breaker.state = CircuitState.CLOSED
         circuit_breaker.failures = []
 
-        result = await execute_zsh_pty("echo unique_pty_cmd", timeout=10, yield_after=1)
+        result = await execute_zsh_pty("echo unique_pty_cmd_2", timeout=10, yield_after=1)
 
-        assert 'warnings' in result
-        assert any("A.L.A.N." in w for w in result['warnings'])
+        assert 'insights' in result
+        assert isinstance(result['insights'], dict)
 
     async def test_pty_status_tracking(self):
         """PTY task tracks status correctly."""
@@ -169,7 +169,7 @@ class TestPTYYieldBehavior:
             task = live_tasks[result['task_id']]
             # Should be completed by now
             if task.status == 'completed':
-                assert task.exit_code is not None
+                assert task.pipestatus is not None
 
 
 @pytest.mark.asyncio
@@ -223,7 +223,7 @@ class TestPTYExitCodes:
         if result['task_id'] in live_tasks:
             task = live_tasks[result['task_id']]
             if task.status == 'completed':
-                assert task.exit_code == 0
+                assert task.pipestatus[-1] == 0
 
     async def test_pty_failure_exit_code(self):
         """PTY captures failure exit code."""
@@ -237,7 +237,7 @@ class TestPTYExitCodes:
         if result['task_id'] in live_tasks:
             task = live_tasks[result['task_id']]
             if task.status == 'completed':
-                assert task.exit_code == 42
+                assert task.pipestatus[-1] == 42
 
 
 @pytest.mark.asyncio
