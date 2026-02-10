@@ -33,6 +33,14 @@ from .tasks import (
     list_tasks,
 )
 
+# ANSI color constants for zsh-tool metadata
+C_GREEN  = "\033[32m"
+C_RED    = "\033[31m"
+C_YELLOW = "\033[33m"
+C_CYAN   = "\033[36m"
+C_DIM    = "\033[2m"
+C_RESET  = "\033[0m"
+
 
 # =============================================================================
 # MCP Server (using official SDK)
@@ -240,43 +248,73 @@ async def _handle_tool_call(name: str, arguments: dict) -> list[TextContent]:
     )]
 
 
+def _color_exit(code: int) -> str:
+    """Color an exit code based on value."""
+    if code == 0:
+        return f"{C_GREEN}{code}{C_RESET}"
+    elif code > 128:
+        return f"{C_YELLOW}{code}{C_RESET}"
+    else:
+        return f"{C_RED}{code}{C_RESET}"
+
+
 def _format_task_output(result: dict) -> list[TextContent]:
-    """Format task-based execution output cleanly."""
+    """Format task-based execution output with ANSI coloring."""
     parts = []
 
-    # Output first - clean
+    # Output first — clean, untouched
     output = result.get('output', '')
-    if output:
+    if output and output.strip():
         parts.append(output.rstrip('\n'))
+    elif result.get('status') == 'completed' and not output.strip():
+        parts.append(f"{C_DIM}(no output){C_RESET}")
 
     # Error message if present
     error = result.get('error')
     if error:
-        parts.append(f"[error] {error}")
+        parts.append(f"{C_RED}[error]{C_RESET} {error}")
 
-    # Status line
+    # Status line with coloring
     status = result.get('status', 'unknown')
     task_id = result.get('task_id', '')
     elapsed = result.get('elapsed_seconds', 0)
 
     if status == "running":
         has_stdin = result.get('has_stdin', False)
-        parts.append(f"[RUNNING task_id={task_id} elapsed={elapsed}s stdin={'yes' if has_stdin else 'no'}]")
+        parts.append(f"{C_CYAN}[RUNNING{C_RESET} task_id={task_id} elapsed={elapsed}s stdin={'yes' if has_stdin else 'no'}{C_CYAN}]{C_RESET}")
         parts.append("Use zsh_poll to continue, zsh_send to input, zsh_kill to stop.")
     elif status == "completed":
-        exit_codes = result.get('exit_codes', '[unknown:-1]')
-        parts.append(f"[COMPLETED task_id={task_id} elapsed={elapsed}s exit={exit_codes}]")
+        pipestatus = result.get('pipestatus', [0])
+        overall_exit = pipestatus[-1] if pipestatus else 0
+        if overall_exit == 0:
+            word = f"{C_GREEN}[COMPLETED"
+            bracket_close = f"{C_GREEN}]{C_RESET}"
+        else:
+            word = f"{C_RED}[FAILED"
+            bracket_close = f"{C_RED}]{C_RESET}"
+        exit_str = f"exit={_color_exit(overall_exit)}"
+        if len(pipestatus) > 1:
+            colored_codes = ",".join(_color_exit(c) for c in pipestatus)
+            exit_str += f" pipestatus=[{colored_codes}]"
+        parts.append(f"{word}{C_RESET} task_id={task_id} elapsed={elapsed}s {exit_str}{bracket_close}")
     elif status == "timeout":
-        parts.append(f"[TIMEOUT task_id={task_id} elapsed={elapsed}s]")
+        parts.append(f"{C_YELLOW}[TIMEOUT{C_RESET} task_id={task_id} elapsed={elapsed}s{C_YELLOW}]{C_RESET}")
     elif status == "killed":
-        parts.append(f"[KILLED task_id={task_id} elapsed={elapsed}s]")
+        parts.append(f"{C_RED}[KILLED{C_RESET} task_id={task_id} elapsed={elapsed}s{C_RED}]{C_RESET}")
     elif status == "error":
-        parts.append(f"[ERROR task_id={task_id} elapsed={elapsed}s]")
+        parts.append(f"{C_RED}[ERROR{C_RESET} task_id={task_id} elapsed={elapsed}s{C_RED}]{C_RESET}")
 
-    if result.get('warnings'):
-        parts.append(f"[warnings: {result['warnings']}]")
+    # ALAN insights — grouped by level with ANSI coloring
+    insights = result.get('insights', {})
+    for level, messages in insights.items():
+        joined = " | ".join(messages)
+        if level == "warning":
+            parts.append(f"{C_YELLOW}[warning: A.L.A.N.: {joined}]{C_RESET}")
+        else:
+            parts.append(f"{C_DIM}[info: A.L.A.N.: {joined}]{C_RESET}")
 
-    return [TextContent(type="text", text='\n'.join(parts) if parts else "(no output)")]
+    text = '\n'.join(parts) if parts else "(no output)"
+    return [TextContent(type="text", text=text)]
 
 
 async def main():

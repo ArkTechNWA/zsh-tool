@@ -13,7 +13,7 @@
 
 Zsh execution tool for Claude Code with full Bash parity, yield-based oversight, PTY mode, NEVERHANG circuit breaker, and A.L.A.N. short-term learning.
 
-**Status:** Beta (v0.4.83)
+**Status:** Beta (v0.4.90)
 
 **Author:** Claude + Meldrey
 
@@ -217,6 +217,16 @@ To use zsh as the only shell, add to `~/.claude/settings.json`:
 ---
 
 ## Changelog
+
+### 0.4.90
+**Feedback Improvements** — *Better signal, less noise*
+- ALAN insights now classified as info/warning tuples
+- Command awareness: grep exit 1 = "no match" (info), exit 127 = "command not found" (warning)
+- Post-execution insights: silent detection, pipe masking warnings, SIGPIPE exclusion
+- ANSI coloring on metadata lines (green=success, red=failure, cyan=running, yellow=timeout)
+- COMPLETED/FAILED status word based on exit code
+- Raw pipestatus lists replace formatted `[cmd:code]` strings
+- Grouped insight display: `[info: A.L.A.N.: ...]` and `[warning: A.L.A.N.: ...]`
 
 ### 0.4.83
 **Python 3.14 Support** — *Future-proofing*

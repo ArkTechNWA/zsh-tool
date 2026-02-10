@@ -65,6 +65,67 @@ def _extract_pipestatus(output: str) -> tuple[str, list[int] | None]:
     return clean_output, pipestatus
 
 
+# --- Command awareness (bounded) ---
+
+KNOWN_EXIT_CODES: dict[str, dict[int, str]] = {
+    "grep":  {1: "no match"},
+    "diff":  {1: "files differ"},
+    "test":  {1: "condition false"},
+    "[":     {1: "condition false"},
+    "cmp":   {1: "files differ"},
+}
+
+UNIVERSAL_EXIT_CODES: dict[int, str] = {
+    126: "permission denied",
+    127: "command not found",
+    255: "SSH connection failed",
+}
+
+
+def get_post_insights(
+    command: str,
+    pipestatus: list[int] | None,
+    output: str = "",
+) -> list[tuple[str, str]]:
+    """Generate post-execution insights based on exit codes and output.
+
+    Handles:
+    - Silent command detection (no output + exit 0)
+    - Command-specific exit code meanings (grep 1 = no match)
+    - Universal exit code meanings (127 = command not found)
+    - Pipe segment failure masking (left-side failures hidden by right-side success)
+
+    Returns list of (level, message) tuples.
+    """
+    insights: list[tuple[str, str]] = []
+
+    if not pipestatus:
+        return insights
+
+    overall_exit = pipestatus[-1]
+
+    # Silent command detection
+    if overall_exit == 0 and not output.strip():
+        insights.append(("info", "No output produced."))
+
+    # Command awareness — universal exit codes
+    base_cmd = command.split()[0].split("/")[-1] if command.strip() else ""
+
+    if overall_exit in UNIVERSAL_EXIT_CODES:
+        insights.append(("warning", f"{UNIVERSAL_EXIT_CODES[overall_exit]} (exit {overall_exit})"))
+    elif base_cmd in KNOWN_EXIT_CODES and overall_exit in KNOWN_EXIT_CODES[base_cmd]:
+        meaning = KNOWN_EXIT_CODES[base_cmd][overall_exit]
+        insights.append(("info", f"{base_cmd} exit {overall_exit} = {meaning} (normal)"))
+
+    # Pipe masking — left-side failures hidden by downstream
+    if len(pipestatus) > 1:
+        for i, code in enumerate(pipestatus[:-1]):
+            if code != 0 and code not in (141,):  # 141=SIGPIPE, normal in pipes
+                insights.append(("warning", f"pipe segment {i + 1} exited {code} (masked by downstream)"))
+
+    return insights
+
+
 class ALAN:
     """
     Short-term learning database with temporal decay, retry detection,
@@ -649,12 +710,12 @@ class ALAN:
 
         return base
 
-    def get_insights(self, command: str, timeout: int = 120) -> list:
+    def get_insights(self, command: str, timeout: int = 120) -> list[tuple[str, str]]:
         """
         Generate proactive insights for a command.
-        Returns list of insight messages to show the user.
+        Returns list of (level, message) tuples. Level is "info" or "warning".
         """
-        insights = []
+        insights: list[tuple[str, str]] = []
         stats = self.get_pattern_stats(command)
         recent = stats.get('recent', {})
         streak = stats.get('streak', {})
@@ -667,11 +728,11 @@ class ALAN:
 
             if count >= 1:
                 if failures > 0 and successes == 0:
-                    insights.append(f"Retry #{count + 1}. Previous {failures} all failed. Different approach?")
+                    insights.append(("warning", f"Retry #{count + 1}. Previous {failures} all failed. Different approach?"))
                 elif successes > 0 and failures == 0:
-                    insights.append(f"Retry #{count + 1}. Previous {successes} succeeded.")
+                    insights.append(("info", f"Retry #{count + 1}. Previous {successes} succeeded."))
                 else:
-                    insights.append(f"Retry #{count + 1} in last {ALAN_RECENT_WINDOW_MINUTES}m. {successes}/{count} succeeded.")
+                    insights.append(("info", f"Retry #{count + 1} in last {ALAN_RECENT_WINDOW_MINUTES}m. {successes}/{count} succeeded."))
 
         # Similar commands
         if recent.get('similar_commands') and not recent.get('is_retry'):
@@ -679,29 +740,29 @@ class ALAN:
             if similar:
                 sim_success = sum(1 for s in similar if s['success'])
                 template = recent.get('template', 'similar pattern')
-                insights.append(f"Similar to '{template}' - {sim_success}/{len(similar)} succeeded recently.")
+                insights.append(("info", f"Similar to '{template}' - {sim_success}/{len(similar)} succeeded recently."))
 
         # Streak info
         if streak.get('has_streak'):
             current = streak['current']
             if current >= ALAN_STREAK_THRESHOLD:
-                insights.append(f"Streak: {current} successes in a row. Solid.")
+                insights.append(("info", f"Streak: {current} successes in a row. Solid."))
             elif current <= -ALAN_STREAK_THRESHOLD:
-                insights.append(f"Failing streak: {abs(current)}. Same approach?")
+                insights.append(("warning", f"Failing streak: {abs(current)}. Same approach?"))
 
         # Pattern history warnings
         if stats.get('known'):
             if stats['timeout_rate'] > 0.5:
-                insights.append(f"{stats['timeout_rate']*100:.0f}% timeout rate for this pattern.")
+                insights.append(("warning", f"{stats['timeout_rate']*100:.0f}% timeout rate for this pattern."))
             elif stats['success_rate'] > 0.9 and stats['observations'] >= 5:
-                insights.append(f"Reliable pattern: {stats['success_rate']*100:.0f}% success ({stats['observations']} runs).")
+                insights.append(("info", f"Reliable pattern: {stats['success_rate']*100:.0f}% success ({stats['observations']} runs)."))
 
             if stats.get('avg_duration_ms'):
                 avg_sec = stats['avg_duration_ms'] / 1000
                 if avg_sec > 10:
-                    insights.append(f"Usually takes ~{avg_sec:.0f}s.")
+                    insights.append(("info", f"Usually takes ~{avg_sec:.0f}s."))
         else:
-            insights.append("New pattern. No history yet.")
+            insights.append(("info", "New pattern. No history yet."))
 
         # SSH-specific insights (Issue #2)
         ssh_info = self._parse_ssh_command(command)
@@ -711,9 +772,9 @@ class ALAN:
 
         return insights
 
-    def _get_ssh_insights(self, ssh_info: dict) -> list:
+    def _get_ssh_insights(self, ssh_info: dict) -> list[tuple[str, str]]:
         """Generate SSH-specific insights based on host and command history."""
-        insights = []
+        insights: list[tuple[str, str]] = []
         host = ssh_info['host']
         remote_cmd = ssh_info['remote_command']
 
@@ -735,9 +796,9 @@ class ALAN:
                 conn_fail_rate = host_stats['conn_failures'] / total
 
                 if conn_fail_rate > 0.3:
-                    insights.append(f"Host '{host}' has {conn_fail_rate*100:.0f}% connection failure rate ({host_stats['conn_failures']}/{total}).")
+                    insights.append(("warning", f"Host '{host}' has {conn_fail_rate*100:.0f}% connection failure rate ({host_stats['conn_failures']}/{total})."))
                 elif host_stats['successes'] == total and total >= 3:
-                    insights.append(f"Host '{host}' is reliable: {total} successful connections.")
+                    insights.append(("info", f"Host '{host}' is reliable: {total} successful connections."))
 
             # Remote command stats (if there's a command)
             if remote_cmd:
@@ -759,9 +820,9 @@ class ALAN:
                         hosts = cmd_stats['hosts'].split(',') if cmd_stats['hosts'] else []
 
                         if cmd_stats['cmd_failures'] > 0 and success_rate < 0.5:
-                            insights.append(f"Remote command '{remote_template}' fails often ({cmd_stats['cmd_failures']}/{total} across {len(hosts)} hosts).")
+                            insights.append(("warning", f"Remote command '{remote_template}' fails often ({cmd_stats['cmd_failures']}/{total} across {len(hosts)} hosts)."))
                         elif success_rate > 0.9 and total >= 3:
-                            insights.append(f"Remote command '{remote_template}' reliable across {len(hosts)} hosts ({success_rate*100:.0f}% success).")
+                            insights.append(("info", f"Remote command '{remote_template}' reliable across {len(hosts)} hosts ({success_rate*100:.0f}% success)."))
 
         return insights
 

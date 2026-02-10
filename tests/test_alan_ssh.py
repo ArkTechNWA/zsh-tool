@@ -252,7 +252,7 @@ class TestSSHInsights:
         """Non-SSH commands shouldn't have SSH insights."""
         insights = alan.get_insights("ls -la")
         # Should have standard insights but nothing SSH-specific
-        ssh_insights = [i for i in insights if 'Host' in i or 'Remote command' in i]
+        ssh_insights = [msg for _, msg in insights if 'Host' in msg or 'Remote command' in msg]
         assert len(ssh_insights) == 0
 
     def test_host_connection_failure_insight(self, alan):
@@ -263,7 +263,7 @@ class TestSSHInsights:
         alan.record("ssh flaky 'ls'", 0, 500)
 
         insights = alan.get_insights("ssh flaky 'pwd'")
-        connection_warnings = [i for i in insights if 'connection failure rate' in i]
+        connection_warnings = [msg for _, msg in insights if 'connection failure rate' in msg]
         assert len(connection_warnings) > 0
 
     def test_reliable_host_insight(self, alan):
@@ -272,7 +272,7 @@ class TestSSHInsights:
             alan.record("ssh reliable 'ls'", 0, 100)
 
         insights = alan.get_insights("ssh reliable 'pwd'")
-        reliable_insights = [i for i in insights if 'reliable' in i.lower() and 'reliable' in i]
+        reliable_insights = [msg for _, msg in insights if 'reliable' in msg.lower()]
         assert len(reliable_insights) > 0
 
     def test_command_failure_insight(self, alan):
@@ -281,7 +281,7 @@ class TestSSHInsights:
         alan.record("ssh host2 'bad-cmd'", 1, 100)
 
         insights = alan.get_insights("ssh host3 'bad-cmd'")
-        fail_insights = [i for i in insights if 'fails often' in i]
+        fail_insights = [msg for _, msg in insights if 'fails often' in msg]
         assert len(fail_insights) > 0
 
     def test_reliable_remote_command_insight(self, alan):
@@ -292,7 +292,7 @@ class TestSSHInsights:
         alan.record("ssh host3 'git pull'", 0, 100)
 
         insights = alan.get_insights("ssh host4 'git pull'")
-        reliable_insights = [i for i in insights if 'reliable across' in i and 'hosts' in i]
+        reliable_insights = [msg for _, msg in insights if 'reliable across' in msg and 'hosts' in msg]
         assert len(reliable_insights) > 0
 
 

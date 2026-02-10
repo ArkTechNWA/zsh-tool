@@ -37,3 +37,6 @@ dist/
 # Local
 .serena/
 discord-ad.md
+
+# Reference repos for analysis
+_reference/

@@ -19,7 +19,7 @@ class TestFormatTaskOutput:
 
     def test_returns_text_content_list(self):
         """Returns list of TextContent."""
-        result = {'status': 'completed', 'task_id': 'abc123', 'exit_codes': '[echo:0]'}
+        result = {'status': 'completed', 'task_id': 'abc123', 'pipestatus': [0]}
         output = _format_task_output(result)
         assert isinstance(output, list)
         assert all(isinstance(tc, TextContent) for tc in output)
@@ -42,7 +42,7 @@ class TestFormatTaskOutput:
         result = {'error': 'Something went wrong', 'status': 'error', 'task_id': 'abc'}
         output = _format_task_output(result)
         assert 'Something went wrong' in output[0].text
-        assert '[error]' in output[0].text
+        assert 'error' in output[0].text
 
     def test_running_status_format(self):
         """Running status has correct format."""
@@ -54,7 +54,7 @@ class TestFormatTaskOutput:
         }
         output = _format_task_output(result)
         text = output[0].text
-        assert '[RUNNING' in text
+        assert 'RUNNING' in text
         assert 'task_id=abc12345' in text
         assert 'stdin=yes' in text
         assert 'zsh_poll' in text
@@ -76,23 +76,23 @@ class TestFormatTaskOutput:
             'status': 'completed',
             'task_id': 'done123',
             'elapsed_seconds': 2.3,
-            'exit_codes': '[echo:0]'
+            'pipestatus': [0]
         }
         output = _format_task_output(result)
         text = output[0].text
-        assert '[COMPLETED' in text
-        assert 'exit=[echo:0]' in text
+        assert 'COMPLETED' in text
+        assert 'exit=' in text
 
     def test_completed_failure_format(self):
-        """Completed with non-zero exit has correct format."""
+        """Completed with non-zero exit shows FAILED."""
         result = {
             'status': 'completed',
             'task_id': 'fail123',
             'elapsed_seconds': 1.0,
-            'exit_codes': '[false:1]'
+            'pipestatus': [1]
         }
         output = _format_task_output(result)
-        assert 'exit=[false:1]' in output[0].text
+        assert 'FAILED' in output[0].text
 
     def test_timeout_status_format(self):
         """Timeout status has correct format."""
@@ -102,7 +102,7 @@ class TestFormatTaskOutput:
             'elapsed_seconds': 60.0
         }
         output = _format_task_output(result)
-        assert '[TIMEOUT' in output[0].text
+        assert 'TIMEOUT' in output[0].text
 
     def test_killed_status_format(self):
         """Killed status has correct format."""
@@ -112,7 +112,7 @@ class TestFormatTaskOutput:
             'elapsed_seconds': 5.0
         }
         output = _format_task_output(result)
-        assert '[KILLED' in output[0].text
+        assert 'KILLED' in output[0].text
 
     def test_error_status_format(self):
         """Error status has correct format."""
@@ -122,24 +122,26 @@ class TestFormatTaskOutput:
             'elapsed_seconds': 0.5
         }
         output = _format_task_output(result)
-        assert '[ERROR' in output[0].text
+        assert 'ERROR' in output[0].text
 
-    def test_includes_warnings(self):
-        """Warnings are included in output."""
+    def test_includes_insights(self):
+        """Insights are included in output."""
         result = {
             'status': 'completed',
-            'task_id': 'warn123',
+            'task_id': 'ins123',
             'elapsed_seconds': 1.0,
-            'warnings': ['Warning 1', 'Warning 2']
+            'pipestatus': [0],
+            'insights': {'info': ['Test insight']}
         }
         output = _format_task_output(result)
-        assert '[warnings:' in output[0].text
+        assert 'A.L.A.N.' in output[0].text
+        assert 'Test insight' in output[0].text
 
     def test_no_output_shows_placeholder(self):
-        """Empty output shows placeholder."""
-        result = {'status': 'completed', 'task_id': 'empty'}
+        """Empty output on completed shows (no output) placeholder."""
+        result = {'status': 'completed', 'task_id': 'empty', 'pipestatus': [0], 'output': ''}
         output = _format_task_output(result)
-        assert '(no output)' in output[0].text or output[0].text.strip() != ''
+        assert 'no output' in output[0].text
 
 
 @pytest.mark.asyncio
@@ -437,21 +439,105 @@ class TestOutputCombinations:
         assert 'partial output' in text
         assert 'failed midway' in text
 
-    def test_output_warnings_and_status(self):
-        """Output, warnings, and status all included."""
+    def test_output_insights_and_status(self):
+        """Output, insights, and status all included."""
         result = {
             'output': 'command output\n',
             'status': 'completed',
             'task_id': 'all',
             'elapsed_seconds': 1.0,
-            'exit_codes': '[cmd:0]',
-            'warnings': ['Test warning']
+            'pipestatus': [0],
+            'insights': {'info': ['Test insight']}
         }
         output = _format_task_output(result)
         text = output[0].text
         assert 'command output' in text
-        assert '[COMPLETED' in text
-        assert '[warnings:' in text
+        assert 'COMPLETED' in text
+        assert 'A.L.A.N.' in text
+
+
+class TestANSIColoring:
+    """Tests for ANSI color codes in output."""
+
+    def test_completed_is_green(self):
+        """Completed status uses green."""
+        result = {'status': 'completed', 'task_id': 'c', 'elapsed_seconds': 1, 'pipestatus': [0]}
+        output = _format_task_output(result)
+        assert '\033[32m' in output[0].text  # green
+
+    def test_failed_is_red(self):
+        """Failed status uses red."""
+        result = {'status': 'completed', 'task_id': 'f', 'elapsed_seconds': 1, 'pipestatus': [1]}
+        output = _format_task_output(result)
+        assert '\033[31m' in output[0].text  # red
+        assert 'FAILED' in output[0].text
+
+    def test_running_is_cyan(self):
+        """Running status uses cyan."""
+        result = {'status': 'running', 'task_id': 'r', 'elapsed_seconds': 1, 'has_stdin': False}
+        output = _format_task_output(result)
+        assert '\033[36m' in output[0].text  # cyan
+
+    def test_timeout_is_yellow(self):
+        """Timeout status uses yellow."""
+        result = {'status': 'timeout', 'task_id': 't', 'elapsed_seconds': 60}
+        output = _format_task_output(result)
+        assert '\033[33m' in output[0].text  # yellow
+
+    def test_info_insight_is_dim(self):
+        """Info insights use dim."""
+        result = {'status': 'completed', 'task_id': 'i', 'elapsed_seconds': 1, 'pipestatus': [0],
+                  'insights': {'info': ['Test']}}
+        output = _format_task_output(result)
+        assert '\033[2m' in output[0].text  # dim
+
+    def test_warning_insight_is_yellow(self):
+        """Warning insights use yellow."""
+        result = {'status': 'completed', 'task_id': 'w', 'elapsed_seconds': 1, 'pipestatus': [1],
+                  'insights': {'warning': ['Bad stuff']}}
+        output = _format_task_output(result)
+        assert output[0].text.count('\033[33m') >= 1  # at least one yellow
+
+
+class TestPipestatusDisplay:
+    """Tests for new pipestatus display format."""
+
+    def test_single_exit_format(self):
+        """Single command shows exit=N."""
+        result = {'status': 'completed', 'task_id': 's', 'elapsed_seconds': 1, 'pipestatus': [0]}
+        output = _format_task_output(result)
+        assert 'exit=' in output[0].text
+
+    def test_pipe_shows_pipestatus(self):
+        """Pipe command shows pipestatus=[...]."""
+        result = {'status': 'completed', 'task_id': 'p', 'elapsed_seconds': 1, 'pipestatus': [0, 1]}
+        output = _format_task_output(result)
+        assert 'pipestatus=' in output[0].text
+
+    def test_failed_status_word_on_nonzero(self):
+        """Non-zero exit shows FAILED not COMPLETED."""
+        result = {'status': 'completed', 'task_id': 'f', 'elapsed_seconds': 1, 'pipestatus': [1]}
+        output = _format_task_output(result)
+        assert 'FAILED' in output[0].text
+        assert 'COMPLETED' not in output[0].text
+
+    def test_completed_status_word_on_zero(self):
+        """Zero exit shows COMPLETED not FAILED."""
+        result = {'status': 'completed', 'task_id': 'c', 'elapsed_seconds': 1, 'pipestatus': [0]}
+        output = _format_task_output(result)
+        assert 'COMPLETED' in output[0].text
+        assert 'FAILED' not in output[0].text
+
+
+class TestSilentCommandOutput:
+    """Tests for silent command (no output) display."""
+
+    def test_no_output_shows_placeholder(self):
+        """Empty output on success shows (no output)."""
+        result = {'status': 'completed', 'task_id': 'n', 'elapsed_seconds': 1,
+                  'output': '', 'pipestatus': [0]}
+        output = _format_task_output(result)
+        assert 'no output' in output[0].text
 
 
 if __name__ == '__main__':
