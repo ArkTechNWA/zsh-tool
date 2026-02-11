@@ -13,7 +13,7 @@
 
 Zsh execution tool for Claude Code with full Bash parity, yield-based oversight, PTY mode, NEVERHANG circuit breaker, and A.L.A.N. short-term learning.
 
-**Status:** Beta (v0.4.90)
+**Status:** Beta (v0.5.0)
 
 **Author:** Claude + Meldrey
 
@@ -44,6 +44,9 @@ zsh-tool is **intelligent shell execution**:
 | Can't type passwords | **PTY mode** — let Claude Code type its own passwords |
 | Timeouts cascade | **NEVERHANG circuit breaker** — fail fast, auto-recover |
 | No memory between calls | **A.L.A.N. 2.0** — retry detection, streak tracking, proactive insights |
+| Polling wastes tokens | **Intelligent polling** — 2s listen window, adaptive suggestions, duration estimates |
+| Blind kills, no learning | **Kill-aware A.L.A.N.** — classifies impatience vs genuine hangs |
+| Retrying with wrong flags | **manopt** — auto-surfaces command options on repeated failures |
 | No task management | **zsh_tasks**, **zsh_kill** — full control |
 
 This is the difference between "run commands" and "intelligent shell integration."
@@ -89,6 +92,38 @@ Intelligent short-term learning — *"Maybe you're fuckin' up, maybe you're doin
 - **Temporal Decay** — exponential decay (24h half-life), auto-prunes
 - **SSH Intelligence** — separates host connectivity from remote command success
 - **Pipeline Segment Tracking** — when `cat foo | grep -badopts | sort` fails, A.L.A.N. knows *which* segment failed
+
+#### Intelligent Polling
+`zsh_poll` performs a **2-second listen window** before returning. If output arrives within 2s, it comes back immediately. If not, poll metadata tells the agent what's happening:
+
+| Field | What it tells you |
+|-------|-------------------|
+| `polls_since_output` | How many empty polls in a row |
+| `elapsed_since_last_output_s` | Idle time since last output |
+| `alan_estimate` | A.L.A.N.'s duration prediction based on command history |
+| `suggestion` | Adaptive advice: space out polls, check soon, or consider killing |
+
+Suggestions are advisory only — the agent always decides. A 2-minute `pip install` no longer generates 40 empty round-trips.
+
+#### Kill-Aware A.L.A.N.
+When the agent kills a command, A.L.A.N. records it as a `KILLED` outcome and classifies *why*:
+
+| Category | Meaning | Example |
+|----------|---------|---------|
+| `EARLY_KILL` | Killed well before median completion | *"Killed at 30s. Median is 120s. Needs more time."* |
+| `LATE_KILL` | Ran way past expected duration | *"Killed after 180s. Median is 45s. Something is wrong."* |
+| `PATTERN_PROBLEM` | Template gets killed >50% of the time | *"This pattern may need a different approach entirely."* |
+
+Kill classification compares `kill_elapsed / median_duration` to distinguish impatience from genuine hangs.
+
+#### manopt — Man Page Options on Failure
+When a command fails repeatedly, A.L.A.N. surfaces its available options:
+
+- **1st failure** — normal feedback, no manopt
+- **2nd failure** — triggers async `manopt` lookup in background (2s timeout)
+- **3rd+ failure** — presents cached option table in A.L.A.N. insight
+
+Parsed from local man pages. Cached in SQLite. On by default (`ALAN_MANOPT_ENABLED=1`).
 
 #### SSH Tracking
 A.L.A.N. treats SSH commands specially, recording two separate observations:
@@ -199,9 +234,13 @@ zsh-tool/
 ## Configuration
 
 Environment variables (set in .mcp.json):
-- `ALAN_DB_PATH` - A.L.A.N. database location
-- `NEVERHANG_TIMEOUT_DEFAULT` - Default timeout (120s)
-- `NEVERHANG_TIMEOUT_MAX` - Maximum timeout (600s)
+- `ALAN_DB_PATH` — A.L.A.N. database location
+- `NEVERHANG_TIMEOUT_DEFAULT` — Default timeout (120s)
+- `NEVERHANG_TIMEOUT_MAX` — Maximum timeout (600s)
+- `ALAN_MANOPT_ENABLED` — Enable man-page option hints on failure (default: `1`)
+- `ALAN_MANOPT_TIMEOUT` — Max seconds to wait for manopt parsing (default: `2.0`)
+- `ALAN_MANOPT_FAIL_TRIGGER` — Fail count to trigger async lookup (default: `2`)
+- `ALAN_MANOPT_FAIL_PRESENT` — Fail count to present cached options (default: `3`)
 
 ### Disabling Bash (Optional)
 
@@ -217,6 +256,15 @@ To use zsh as the only shell, add to `~/.claude/settings.json`:
 ---
 
 ## Changelog
+
+### 0.5.0
+**A.L.A.N. v2 Upgrade** — *Intelligent polling, kill awareness, manopt*
+- **Intelligent polling**: 2s listen window in `zsh_poll` reduces empty round-trips; poll metadata with duration estimates and adaptive suggestions
+- **Kill-aware A.L.A.N.**: `KILLED` outcome type with elapsed tracking; classifies early kills (impatience), late kills (genuine hangs), and pattern problems (wrong approach)
+- **manopt integration**: Async man-page option parsing on repeated command failures; cached in SQLite; presented on 3rd+ failure for the same command template
+- New `outcome_type` and `kill_elapsed_ms` columns on observations
+- New `manopt_cache` table for persistent man-page option storage
+- ENV vars: `ALAN_MANOPT_ENABLED`, `ALAN_MANOPT_TIMEOUT`, `ALAN_MANOPT_FAIL_TRIGGER`, `ALAN_MANOPT_FAIL_PRESENT`
 
 ### 0.4.90
 **Feedback Improvements** — *Better signal, less noise*
