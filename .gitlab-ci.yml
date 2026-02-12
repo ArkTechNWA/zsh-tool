@@ -84,8 +84,24 @@ publish-pypi:
   before_script:
     - pip install build twine --break-system-packages
   script:
-    - python -m build
-    - twine upload dist/* --non-interactive
+    - |
+      VERSION=$(python -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
+      echo "Checking PyPI for zsh-tool-mcp v${VERSION}..."
+      PYPI_EXISTS=$(python -c "
+      import urllib.request, urllib.error
+      try:
+          urllib.request.urlopen('https://pypi.org/pypi/zsh-tool-mcp/${VERSION}/json')
+          print('yes')
+      except urllib.error.HTTPError:
+          print('no')
+      ")
+      if [ "$PYPI_EXISTS" = "yes" ]; then
+        echo "✓ v${VERSION} already on PyPI — skipping publish"
+      else
+        python -m build
+        twine upload dist/* --non-interactive
+        echo "✓ Published v${VERSION} to PyPI"
+      fi
   rules:
     - if: $CI_COMMIT_BRANCH == "master"
       when: manual
@@ -114,9 +130,17 @@ release:
       fi
       echo "✓ Commit has passing pipeline"
   script:
-    - python3 -m build
-    - twine upload dist/* --non-interactive
-    - echo "Published to PyPI, creating GitLab Release..."
+    - |
+      VERSION=$(echo "$CI_COMMIT_TAG" | sed 's/^v//')
+      echo "Checking PyPI for zsh-tool-mcp v${VERSION}..."
+      if curl -sf "https://pypi.org/pypi/zsh-tool-mcp/${VERSION}/json" > /dev/null 2>&1; then
+        echo "✓ v${VERSION} already on PyPI — skipping publish"
+      else
+        python3 -m build
+        twine upload dist/* --non-interactive
+        echo "✓ Published v${VERSION} to PyPI"
+      fi
+    - echo "Creating GitLab Release..."
   release:
     tag_name: $CI_COMMIT_TAG
     name: "$CI_COMMIT_TAG"
