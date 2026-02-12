@@ -155,6 +155,6 @@ sync-to-github:
   script:
     - git remote add github $GITHUB_REPO || git remote set-url github $GITHUB_REPO
     - git fetch --unshallow origin || true
-    - git fetch origin --tags
+    - git fetch origin --tags --force
     - git push github HEAD:refs/heads/master --force
     - git push github --tags --force
