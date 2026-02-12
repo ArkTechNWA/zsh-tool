@@ -7,9 +7,12 @@ streak tracking, and proactive insights.
 "Maybe you're fuckin' up, maybe you're doing it right."
 """
 
+import asyncio
 import hashlib
 import re
+import shutil
 import sqlite3
+import sys
 import time
 import uuid
 from contextlib import contextmanager
@@ -25,6 +28,10 @@ from .config import (
     ALAN_RECENT_WINDOW_MINUTES,
     ALAN_STREAK_THRESHOLD,
     PIPESTATUS_MARKER,
+    ALAN_MANOPT_ENABLED,
+    ALAN_MANOPT_TIMEOUT,
+    ALAN_MANOPT_FAIL_TRIGGER,
+    ALAN_MANOPT_FAIL_PRESENT,
 )
 
 
@@ -215,6 +222,13 @@ class ALAN:
                 CREATE INDEX IF NOT EXISTS idx_ssh_host ON ssh_observations(host);
                 CREATE INDEX IF NOT EXISTS idx_ssh_remote_template ON ssh_observations(remote_command_template);
                 CREATE INDEX IF NOT EXISTS idx_ssh_exit_type ON ssh_observations(exit_type);
+
+                -- manopt cache (v0.5.1) — man page option tables
+                CREATE TABLE IF NOT EXISTS manopt_cache (
+                    base_command TEXT PRIMARY KEY,
+                    options_text TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                );
             """)
 
             # A.L.A.N. 2.0 migrations - add columns if missing
@@ -572,6 +586,12 @@ class ALAN:
             cutoff = now - (ALAN_RECENT_WINDOW_MINUTES * 60 * 10)  # Keep 10x window
             conn.execute("DELETE FROM recent_commands WHERE timestamp < ?", (cutoff,))
 
+        # manopt trigger on repeated failures (v0.5.1)
+        if exit_code != 0 and not timed_out:
+            fail_count = self._get_template_fail_count(command)
+            if fail_count == ALAN_MANOPT_FAIL_TRIGGER:
+                self._trigger_manopt_async(command)
+
     def _update_streak(self, conn, command_hash: str, success: int, now: float):
         """Update streak tracking for a command pattern."""
         row = conn.execute(
@@ -609,6 +629,104 @@ class ALAN:
                                     longest_fail_streak, last_result, last_updated)
                 VALUES (?, ?, ?, ?, ?, ?)
             """, (command_hash, 1 if success else -1, 1 if success else 0, 0 if success else 1, success, now))
+
+    def _get_template_fail_count(self, command: str) -> int:
+        """Count consecutive recent failures for a command template."""
+        template = self._template_command(command)
+        with self._connect() as conn:
+            rows = conn.execute("""
+                SELECT success FROM recent_commands
+                WHERE session_id = ? AND command_template = ?
+                ORDER BY timestamp DESC LIMIT 10
+            """, (self.session_id, template)).fetchall()
+
+        count = 0
+        for row in rows:
+            if row['success']:
+                break
+            count += 1
+        return count
+
+    def _get_cached_manopt(self, base_cmd: str) -> str | None:
+        """Get cached manopt output for a base command."""
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT options_text FROM manopt_cache WHERE base_command = ?",
+                (base_cmd,)
+            ).fetchone()
+        return row['options_text'] if row else None
+
+    def _find_manopt_script(self) -> str | None:
+        """Locate the manopt script."""
+        # 1. Package resource (pip install)
+        try:
+            from importlib.resources import files
+            pkg_script = files('zsh_tool').joinpath('scripts', 'manopt')
+            if pkg_script.is_file():
+                return str(pkg_script)
+        except Exception:
+            pass
+
+        # 2. Relative to this file (dev mode / editable install)
+        dev_path = Path(__file__).parent.parent / 'scripts' / 'manopt'
+        if dev_path.exists():
+            return str(dev_path)
+
+        # 3. PATH lookup
+        return shutil.which('manopt')
+
+    def _trigger_manopt_async(self, command: str):
+        """Fire-and-forget async manopt lookup."""
+        if not ALAN_MANOPT_ENABLED:
+            return
+
+        base_cmd = command.split()[0].split("/")[-1] if command.strip() else ""
+        if not base_cmd:
+            return
+
+        # Skip if already cached
+        with self._connect() as conn:
+            cached = conn.execute(
+                "SELECT 1 FROM manopt_cache WHERE base_command = ?",
+                (base_cmd,)
+            ).fetchone()
+        if cached:
+            return
+
+        # Find manopt script
+        manopt_path = self._find_manopt_script()
+        if not manopt_path:
+            return
+
+        # Launch async — fire and forget
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(self._run_manopt(base_cmd, manopt_path))
+        except RuntimeError:
+            pass  # No running event loop — skip silently
+
+    async def _run_manopt(self, base_cmd: str, manopt_path: str):
+        """Run manopt with timeout, cache result."""
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                sys.executable, manopt_path, base_cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            stdout, _ = await asyncio.wait_for(
+                proc.communicate(), timeout=ALAN_MANOPT_TIMEOUT
+            )
+
+            if proc.returncode == 0 and stdout:
+                text = stdout.decode('utf-8', errors='replace')
+                with self._connect() as conn:
+                    conn.execute("""
+                        INSERT OR REPLACE INTO manopt_cache
+                        (base_command, options_text, created_at)
+                        VALUES (?, ?, ?)
+                    """, (base_cmd, text, datetime.now(timezone.utc).isoformat()))
+        except (asyncio.TimeoutError, Exception):
+            pass  # manopt too slow or failed — silently skip
 
     def get_recent_activity(self, command: str) -> dict:
         """Get recent activity for retry detection."""
@@ -769,6 +887,14 @@ class ALAN:
         if ssh_info:
             ssh_insights = self._get_ssh_insights(ssh_info)
             insights.extend(ssh_insights)
+
+        # manopt presentation on repeated failures (v0.5.1)
+        if ALAN_MANOPT_ENABLED and self._get_template_fail_count(command) >= ALAN_MANOPT_FAIL_PRESENT - 1:
+            base_cmd = command.split()[0].split("/")[-1] if command.strip() else ""
+            if base_cmd:
+                manopt_text = self._get_cached_manopt(base_cmd)
+                if manopt_text:
+                    insights.append(("info", f"Options for '{base_cmd}':\n{manopt_text}"))
 
         return insights
 

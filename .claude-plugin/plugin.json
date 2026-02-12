@@ -1,6 +1,6 @@
 {
   "name": "zsh-tool",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "Zsh shell for Claude Code - full terminal control, live output, PTY mode for interactive commands",
   "author": {
     "name": "ArkTechNWA",
