@@ -157,4 +157,4 @@ sync-to-github:
     - git fetch --unshallow origin || true
     - git fetch origin --tags
     - git push github HEAD:refs/heads/master --force
-    - git push github --tags
+    - git push github --tags --force
