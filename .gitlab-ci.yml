@@ -180,5 +180,25 @@ sync-to-github:
     - git remote add github $GITHUB_REPO || git remote set-url github $GITHUB_REPO
     - git fetch --unshallow origin || true
     - git fetch origin --tags --force
-    - git push github HEAD:refs/heads/master --force
-    - git push github --tags --force
+    - |
+      # Compare branch HEAD
+      GITHUB_HEAD=$(git ls-remote github refs/heads/master 2>/dev/null | awk '{print $1}')
+      LOCAL_HEAD=$(git rev-parse HEAD)
+      # Compare tags
+      LOCAL_TAGS=$(git tag -l | sort)
+      GITHUB_TAGS=$(git ls-remote --tags github 2>/dev/null | awk '{print $2}' | sed 's|refs/tags/||' | grep -v '\^{}' | sort)
+      if [ "$GITHUB_HEAD" = "$LOCAL_HEAD" ] && [ "$LOCAL_TAGS" = "$GITHUB_TAGS" ]; then
+        echo "✓ GitHub already in sync — no diff, skipping"
+      else
+        if [ "$GITHUB_HEAD" != "$LOCAL_HEAD" ]; then
+          echo "Branch diff: GitHub=${GITHUB_HEAD:-<none>} Local=$LOCAL_HEAD"
+          git push github HEAD:refs/heads/master --force
+          echo "✓ Pushed branch"
+        fi
+        if [ "$LOCAL_TAGS" != "$GITHUB_TAGS" ]; then
+          echo "Tag diff detected"
+          git push github --tags --force
+          echo "✓ Pushed tags"
+        fi
+        echo "✓ Synced to GitHub"
+      fi
