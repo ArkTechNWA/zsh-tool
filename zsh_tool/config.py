@@ -32,6 +32,12 @@ ALAN_RECENT_WINDOW_SIZE = 50      # Track last N commands
 ALAN_RECENT_WINDOW_MINUTES = 10   # For retry detection
 ALAN_STREAK_THRESHOLD = 3         # Min streak to report
 
+# manopt integration (v0.5.1)
+ALAN_MANOPT_ENABLED = os.environ.get("ALAN_MANOPT_ENABLED", "1").lower() not in ("0", "false", "no", "off")
+ALAN_MANOPT_TIMEOUT = float(os.environ.get("ALAN_MANOPT_TIMEOUT", "2.0"))
+ALAN_MANOPT_FAIL_TRIGGER = int(os.environ.get("ALAN_MANOPT_FAIL_TRIGGER", "2"))
+ALAN_MANOPT_FAIL_PRESENT = int(os.environ.get("ALAN_MANOPT_FAIL_PRESENT", "3"))
+
 # Pipeline segment tracking (Issue #20)
 PIPESTATUS_MARKER = "___ZSH_PIPESTATUS_MARKER_f9a8b7c6___"
 

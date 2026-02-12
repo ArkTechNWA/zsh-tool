@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "zsh-tool-mcp"
-version = "0.5.0"
+version = "0.5.1"
 description = "Zsh for Claude Code. PTY mode lets Claude type passwords. NEVERHANG + A.L.A.N."
 readme = "README.md"
 license = {text = "MIT"}
@@ -49,6 +49,9 @@ zsh-tool-mcp = "zsh_tool.server:run"
 
 [tool.hatch.build.targets.wheel]
 packages = ["zsh_tool"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"scripts/manopt" = "zsh_tool/scripts/manopt"
 
 [tool.pytest.ini_options]
 asyncio_mode = "strict"
