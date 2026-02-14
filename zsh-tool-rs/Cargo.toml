@@ -1,0 +1,15 @@
+[package]
+name = "zsh-tool-exec"
+version = "0.5.1"
+edition = "2021"
+description = "fd 3 sideband executor for zsh-tool"
+
+[[bin]]
+name = "zsh-tool-exec"
+path = "src/main.rs"
+
+[dependencies]
+nix = { version = "0.29", features = ["process", "signal", "fs", "term"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+libc = "0.2"

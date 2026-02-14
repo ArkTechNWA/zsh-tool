@@ -85,3 +85,18 @@ _user_config = _load_user_config()
 
 # Derived config values
 YIELD_AFTER_DEFAULT = _user_config.get('yield_after', 2.0)  # From ~/.config/zsh-tool/config.yaml or default
+
+# Rust executor binary (Phase 1 of Rust rewrite)
+# If set, tasks.py uses the Rust executor instead of wrapping zsh directly.
+_exec_path = os.environ.get("ZSH_TOOL_EXEC")
+if _exec_path is None:
+    _candidates = [
+        Path(__file__).parent.parent / "zsh-tool-rs" / "target" / "release" / "zsh-tool-exec",
+        Path(__file__).parent.parent / "zsh-tool-rs" / "target" / "debug" / "zsh-tool-exec",
+    ]
+    for _c in _candidates:
+        if _c.exists():
+            _exec_path = str(_c)
+            break
+
+EXEC_BINARY_PATH = _exec_path  # None means use legacy Python executor
