@@ -17,8 +17,12 @@ import uuid
 from dataclasses import dataclass
 from typing import Any, Optional
 
+import json as _json
+import tempfile as _tempfile
+
 from .config import (
     ALAN_DB_PATH,
+    EXEC_BINARY_PATH,
     NEVERHANG_TIMEOUT_DEFAULT,
     NEVERHANG_TIMEOUT_MAX,
     TRUNCATE_OUTPUT_AT,
@@ -152,6 +156,81 @@ async def _output_collector(task: LiveTask):
         task.error = str(e)
 
 
+async def _rust_output_collector(task: LiveTask, meta_path: str):
+    """Background coroutine that collects output from the Rust executor.
+
+    The Rust binary handles fd 3 sideband, timeout, and process management.
+    We just read its stdout (which is clean command output) and parse the
+    meta-file it writes on exit.
+    """
+    try:
+        while True:
+            try:
+                chunk = await asyncio.wait_for(
+                    task.process.stdout.read(4096),
+                    timeout=0.1
+                )
+                if chunk:
+                    task.output_buffer += chunk.decode('utf-8', errors='replace')
+                elif task.process.returncode is not None:
+                    break
+                else:
+                    await asyncio.sleep(0.05)
+            except asyncio.TimeoutError:
+                if task.process.returncode is not None:
+                    break
+                await asyncio.sleep(0.01)
+                continue
+
+        # Ensure process has finished
+        await task.process.wait()
+
+        # Read metadata from meta-file (no in-band markers!)
+        pipestatus = None
+        timed_out = False
+        try:
+            with open(meta_path, 'r') as f:
+                meta = _json.load(f)
+            pipestatus = meta.get('pipestatus')
+            timed_out = meta.get('timed_out', False)
+        except (FileNotFoundError, _json.JSONDecodeError):
+            pass
+        finally:
+            try:
+                os.unlink(meta_path)
+            except OSError:
+                pass
+
+        if timed_out:
+            task.status = "timeout"
+            circuit_breaker.record_timeout(alan._hash_command(task.command))
+
+        fallback_code = task.process.returncode if task.process.returncode is not None else 0
+        task.pipestatus = pipestatus if pipestatus else [fallback_code]
+
+        if task.status == "running":
+            task.status = "completed"
+            if _pipestatus_success(task.pipestatus):
+                circuit_breaker.record_success()
+
+        duration_ms = int((time.time() - task.started_at) * 1000)
+        primary_exit = task.pipestatus[-1]
+        alan.record(
+            task.command,
+            primary_exit,
+            duration_ms,
+            task.status == "timeout",
+            task.output_buffer[:500],
+            "",
+            pipestatus=pipestatus
+        )
+        alan.maybe_prune()
+
+    except Exception as e:
+        task.status = "error"
+        task.error = str(e)
+
+
 async def _pty_output_collector(task: LiveTask):
     """Background coroutine that collects output from a PTY."""
     fallback_code = 0  # Track process exit for fallback
@@ -267,7 +346,33 @@ async def execute_zsh_pty(
     # Create task ID
     task_id = str(uuid.uuid4())[:8]
 
-    # Fork with PTY
+    # Use Rust executor with --pty if available
+    if EXEC_BINARY_PATH:
+        meta_path = _tempfile.mktemp(prefix='zsh-meta-', suffix='.json')
+        proc = await asyncio.create_subprocess_exec(
+            EXEC_BINARY_PATH,
+            "--meta", meta_path,
+            "--timeout", str(timeout),
+            "--pty",
+            "--", command,
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        task = LiveTask(
+            task_id=task_id,
+            command=command,
+            process=proc,
+            started_at=time.time(),
+            timeout=timeout,
+            is_pty=True,
+        )
+        live_tasks[task_id] = task
+        asyncio.create_task(_rust_output_collector(task, meta_path))
+        await asyncio.sleep(yield_after)
+        return _build_task_response(task, insights)
+
+    # Legacy: direct PTY fork (fallback when Rust binary not available)
     pid, master_fd = pty.fork()
 
     if pid == 0:
@@ -337,10 +442,33 @@ async def execute_zsh_yielding(
     # Create task
     task_id = str(uuid.uuid4())[:8]
 
-    # Wrap command for pipestatus capture
+    # Use Rust executor if available
+    if EXEC_BINARY_PATH:
+        meta_path = _tempfile.mktemp(prefix='zsh-meta-', suffix='.json')
+        proc = await asyncio.create_subprocess_exec(
+            EXEC_BINARY_PATH,
+            "--meta", meta_path,
+            "--timeout", str(timeout),
+            "--", command,
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        task = LiveTask(
+            task_id=task_id,
+            command=command,
+            process=proc,
+            started_at=time.time(),
+            timeout=timeout
+        )
+        live_tasks[task_id] = task
+        asyncio.create_task(_rust_output_collector(task, meta_path))
+        await asyncio.sleep(yield_after)
+        return _build_task_response(task, insights)
+
+    # Legacy: direct zsh subprocess (fallback when Rust binary not available)
     wrapped_command = _wrap_for_pipestatus(command)
 
-    # Start process with stdin pipe for interactive input
     proc = await asyncio.create_subprocess_shell(
         wrapped_command,
         stdin=asyncio.subprocess.PIPE,
@@ -358,13 +486,8 @@ async def execute_zsh_yielding(
     )
     live_tasks[task_id] = task
 
-    # Start background output collector
     asyncio.create_task(_output_collector(task))
-
-    # Wait for yield_after seconds then return (process continues in background)
     await asyncio.sleep(yield_after)
-
-    # Check status and return
     return _build_task_response(task, insights)
 
 

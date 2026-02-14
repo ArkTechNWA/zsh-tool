@@ -95,6 +95,26 @@ yield_after: 5
             assert result == {'yield_after': 10.0}
 
 
+class TestExecBinaryPath:
+    """Tests for EXEC_BINARY_PATH discovery."""
+
+    def test_exec_binary_path_type(self):
+        """EXEC_BINARY_PATH should be None or a string path."""
+        from zsh_tool.config import EXEC_BINARY_PATH
+        assert EXEC_BINARY_PATH is None or isinstance(EXEC_BINARY_PATH, str)
+
+    def test_exec_binary_env_override(self, monkeypatch):
+        """ZSH_TOOL_EXEC env var should override auto-detection."""
+        monkeypatch.setenv("ZSH_TOOL_EXEC", "/custom/path/zsh-tool-exec")
+        import importlib
+        import zsh_tool.config as config_module
+        importlib.reload(config_module)
+        assert config_module.EXEC_BINARY_PATH == "/custom/path/zsh-tool-exec"
+        # Reload again to restore
+        monkeypatch.delenv("ZSH_TOOL_EXEC")
+        importlib.reload(config_module)
+
+
 class TestYieldAfterDefault:
     """Tests for YIELD_AFTER_DEFAULT initialization."""
 
