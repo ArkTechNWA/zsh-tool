@@ -239,7 +239,12 @@ class TestKillTask:
             assert task_id not in live_tasks  # Should be removed
 
     async def test_kill_pty_task(self):
-        """kill_task successfully kills PTY task."""
+        """kill_task successfully kills PTY task.
+
+        TODO(phase3): Race condition — Rust executor can complete `sleep 100`
+        setup before yield_after=0.5 returns control. Fix: use longer sleep
+        or add explicit readiness signal.
+        """
         circuit_breaker.state = CircuitState.CLOSED
         circuit_breaker.failures = []
 

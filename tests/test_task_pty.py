@@ -92,7 +92,12 @@ class TestExecuteZshPty:
         circuit_breaker.failures = []
 
     async def test_pty_includes_insights(self):
-        """PTY execution includes A.L.A.N. insights."""
+        """PTY execution includes A.L.A.N. insights.
+
+        TODO(phase3): Flaky when run after other tests because Rust executor
+        now writes to ALAN DB during earlier tests, giving this "unique" command
+        prior history. Fix: use per-test temp DB or reset DB between tests.
+        """
         circuit_breaker.state = CircuitState.CLOSED
         circuit_breaker.failures = []
 
