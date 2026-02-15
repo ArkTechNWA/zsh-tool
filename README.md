@@ -7,13 +7,12 @@
 # zsh-tool
 
 [![CI/CD](https://img.shields.io/gitlab/pipeline-status/arktechnwa%2Fmcp%2Fzsh-tool?branch=master&gitlab_url=https%3A%2F%2Fgitlab.arktechnwa.com&label=CI%2FCD)](https://gitlab.arktechnwa.com/arktechnwa/mcp/zsh-tool/-/pipelines)
-[![coverage](https://img.shields.io/gitlab/pipeline-coverage/arktechnwa%2Fmcp%2Fzsh-tool?branch=master&gitlab_url=https%3A%2F%2Fgitlab.arktechnwa.com)](https://gitlab.arktechnwa.com/arktechnwa/mcp/zsh-tool/-/pipelines)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Python 3.14](https://img.shields.io/badge/python-3.14-blue.svg)](https://www.python.org/)
+[![Rust](https://img.shields.io/badge/rust-stable-orange.svg)](https://www.rust-lang.org/)
 
 Zsh execution tool for Claude Code with full Bash parity, yield-based oversight, PTY mode, NEVERHANG circuit breaker, and A.L.A.N. short-term learning.
 
-**Status:** Beta (v0.5.1)
+**Status:** Beta (v0.6.0)
 
 **Author:** Claude + Meldrey
 
@@ -187,7 +186,7 @@ Enable in `~/.claude/settings.json`:
 }
 ```
 
-The bundled `scripts/run-mcp.sh` creates a venv and installs automatically.
+The bundled `scripts/run-mcp.sh` builds the Rust binary on first run and launches the MCP server.
 
 ### Local Development
 
@@ -211,6 +210,8 @@ Alternatively, create a `.mcp.local.json` with absolute paths:
 
 The `ALAN_DB_PATH` will be automatically set to `{plugin_root}/data/alan.db` if not explicitly provided.
 
+**Requirements:** Rust toolchain (`cargo`) and `zsh` must be installed.
+
 ---
 
 ## Architecture
@@ -221,11 +222,33 @@ zsh-tool/
 │   ├── plugin.json
 │   └── CLAUDE.md
 ├── .mcp.json
-├── src/
-│   └── server.py      # MCP server
+├── zsh-tool-rs/
+│   ├── Cargo.toml
+│   └── src/
+│       ├── main.rs          # CLI entry point
+│       ├── lib.rs           # Module exports
+│       ├── executor.rs      # Pipe/PTY command execution
+│       ├── config.rs        # User config (~/.config/zsh-tool/)
+│       ├── circuit.rs       # NEVERHANG circuit breaker
+│       ├── meta.rs          # Task metadata (exit code, pipestatus)
+│       ├── alan/            # A.L.A.N. 2.0 learning engine
+│       │   ├── mod.rs       #   Recording + insights
+│       │   ├── hash.rs      #   Fuzzy command hashing
+│       │   ├── insights.rs  #   Proactive feedback
+│       │   ├── manopt.rs    #   Man-page option parsing
+│       │   ├── ssh.rs       #   SSH host/command tracking
+│       │   ├── streak.rs    #   Success/failure streaks
+│       │   ├── pipeline.rs  #   Pipeline segment tracking
+│       │   ├── prune.rs     #   Temporal decay + pruning
+│       │   └── stats.rs     #   Database statistics
+│       └── serve/           # MCP JSON-RPC server
+│           ├── mod.rs       #   Request dispatch + tool handlers
+│           ├── protocol.rs  #   JSON-RPC framing
+│           └── tools.rs     #   Tool schema definitions
+├── scripts/
+│   └── run-mcp.sh           # Build + launch wrapper
 ├── data/
-│   └── alan.db        # A.L.A.N. SQLite database
-├── .venv/             # Python virtual environment
+│   └── alan.db              # A.L.A.N. SQLite database
 └── README.md
 ```
 
@@ -256,6 +279,15 @@ To use zsh as the only shell, add to `~/.claude/settings.json`:
 ---
 
 ## Changelog
+
+### 0.6.0
+**Full Rust Rewrite** — *Goodbye Python, hello speed*
+- **Complete rewrite in Rust** — MCP server, executor, A.L.A.N., NEVERHANG, all native
+- **79 Rust tests** — unit tests + full MCP integration tests (JSON-RPC round-trip)
+- **CI pipeline rewritten** — `cargo test` + `cargo clippy` replace pytest + ruff
+- **Python removed** — 7,600+ lines of Python deleted, zero Python dependencies
+- **~2x faster CI** — cold build 97s → cached 48s (vs Python's 60-120s)
+- All features preserved: yield/poll/send/kill, PTY mode, A.L.A.N. 2.0, NEVERHANG, manopt, SSH tracking, pipeline segments
 
 ### 0.5.0
 **A.L.A.N. v2 Upgrade** — *Intelligent polling, kill awareness, manopt*
