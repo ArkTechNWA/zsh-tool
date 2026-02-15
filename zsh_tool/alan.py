@@ -449,6 +449,11 @@ class ALAN:
                pipestatus: list[int] | None = None):
         """Record a command execution for learning.
 
+        NOTE: When the Rust executor is active, core recording (observations,
+        recent_commands, streaks, pipeline segments) is handled by Rust.
+        This method is still called from the legacy Python executor path.
+        TODO(phase3): remove this method when Rust handles everything.
+
         Args:
             command: The full command string
             exit_code: Exit code of the command
@@ -704,6 +709,50 @@ class ALAN:
             loop.create_task(self._run_manopt(base_cmd, manopt_path))
         except RuntimeError:
             pass  # No running event loop — skip silently
+
+    def _record_ssh_if_applicable(self, command: str, exit_code: int,
+                                    duration_ms: int, stdout: str):
+        """Record SSH observation if this is an SSH command.
+
+        Called from _rust_output_collector — Rust handles core recording,
+        but SSH observations stay in Python for now.
+        TODO(phase3): port SSH recording to Rust executor.
+        """
+        ssh_info = self._parse_ssh_command(command)
+        if not ssh_info:
+            return
+        exit_type = self._classify_ssh_exit(exit_code)
+        remote_template = (self._template_command(ssh_info['remote_command'])
+                          if ssh_info['remote_command'] else None)
+        with self._connect() as conn:
+            conn.execute("""
+                INSERT INTO ssh_observations
+                (id, observation_id, host, remote_command, remote_command_template,
+                 exit_code, exit_type, duration_ms, timed_out, weight, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 1.0, ?)
+            """, (
+                str(uuid.uuid4()),
+                None,  # No linked observation — Rust wrote it
+                ssh_info['host'],
+                ssh_info['remote_command'][:200] if ssh_info['remote_command'] else None,
+                remote_template,
+                exit_code,
+                exit_type,
+                duration_ms,
+                datetime.now(timezone.utc).isoformat()
+            ))
+
+    def _trigger_manopt_if_applicable(self, command: str, exit_code: int):
+        """Trigger manopt caching on repeated failures.
+
+        Called from _rust_output_collector — Rust handles core recording,
+        but manopt async triggering stays in Python for now.
+        TODO(phase3): port manopt triggering to Rust executor.
+        """
+        if exit_code != 0:
+            fail_count = self._get_template_fail_count(command)
+            if fail_count == ALAN_MANOPT_FAIL_TRIGGER:
+                self._trigger_manopt_async(command)
 
     async def _run_manopt(self, base_cmd: str, manopt_path: str):
         """Run manopt with timeout, cache result."""

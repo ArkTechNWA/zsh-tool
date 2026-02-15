@@ -213,17 +213,15 @@ async def _rust_output_collector(task: LiveTask, meta_path: str):
             if _pipestatus_success(task.pipestatus):
                 circuit_breaker.record_success()
 
+        # ALAN core recording handled by Rust executor (--db flag).
+        # Only SSH recording and manopt triggering remain in Python.
+        # TODO(phase3): port SSH recording and manopt to Rust.
         duration_ms = int((time.time() - task.started_at) * 1000)
         primary_exit = task.pipestatus[-1]
-        alan.record(
-            task.command,
-            primary_exit,
-            duration_ms,
-            task.status == "timeout",
-            task.output_buffer[:500],
-            "",
-            pipestatus=pipestatus
+        alan._record_ssh_if_applicable(
+            task.command, primary_exit, duration_ms, task.output_buffer[:500]
         )
+        alan._trigger_manopt_if_applicable(task.command, primary_exit)
         alan.maybe_prune()
 
     except Exception as e:
@@ -349,12 +347,17 @@ async def execute_zsh_pty(
     # Use Rust executor with --pty if available
     if EXEC_BINARY_PATH:
         meta_path = _tempfile.mktemp(prefix='zsh-meta-', suffix='.json')
-        proc = await asyncio.create_subprocess_exec(
+        exec_args = [
             EXEC_BINARY_PATH,
             "--meta", meta_path,
             "--timeout", str(timeout),
             "--pty",
+            "--db", str(ALAN_DB_PATH),
+            "--session-id", alan.session_id,
             "--", command,
+        ]
+        proc = await asyncio.create_subprocess_exec(
+            *exec_args,
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
@@ -445,11 +448,16 @@ async def execute_zsh_yielding(
     # Use Rust executor if available
     if EXEC_BINARY_PATH:
         meta_path = _tempfile.mktemp(prefix='zsh-meta-', suffix='.json')
-        proc = await asyncio.create_subprocess_exec(
+        exec_args = [
             EXEC_BINARY_PATH,
             "--meta", meta_path,
             "--timeout", str(timeout),
+            "--db", str(ALAN_DB_PATH),
+            "--session-id", alan.session_id,
             "--", command,
+        ]
+        proc = await asyncio.create_subprocess_exec(
+            *exec_args,
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,

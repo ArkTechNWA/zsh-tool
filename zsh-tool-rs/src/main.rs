@@ -1,11 +1,12 @@
 use std::env;
 use std::process;
 
+mod alan;
 mod executor;
 mod meta;
 
 fn print_usage() {
-    eprintln!("Usage: zsh-tool-exec --meta <path> [--timeout <secs>] [--pty] -- <command>");
+    eprintln!("Usage: zsh-tool-exec --meta <path> [--timeout <secs>] [--pty] [--db <path> --session-id <id>] -- <command>");
     process::exit(2);
 }
 
@@ -14,6 +15,8 @@ struct Args {
     timeout_secs: u64,
     pty: bool,
     command: String,
+    db_path: Option<String>,
+    session_id: Option<String>,
 }
 
 fn parse_args() -> Args {
@@ -22,6 +25,8 @@ fn parse_args() -> Args {
     let mut timeout_secs: u64 = 120;
     let mut pty = false;
     let mut command = String::new();
+    let mut db_path: Option<String> = None;
+    let mut session_id: Option<String> = None;
     let mut i = 0;
     let mut after_dashdash = false;
 
@@ -41,6 +46,20 @@ fn parse_args() -> Args {
             "--timeout" => {
                 i += 1;
                 timeout_secs = args.get(i).and_then(|s| s.parse().ok()).unwrap_or(120);
+            }
+            "--db" => {
+                i += 1;
+                db_path = Some(args.get(i).cloned().unwrap_or_else(|| {
+                    print_usage();
+                    unreachable!()
+                }));
+            }
+            "--session-id" => {
+                i += 1;
+                session_id = Some(args.get(i).cloned().unwrap_or_else(|| {
+                    print_usage();
+                    unreachable!()
+                }));
             }
             "--pty" => pty = true,
             "--" => after_dashdash = true,
@@ -62,6 +81,8 @@ fn parse_args() -> Args {
         timeout_secs,
         pty,
         command,
+        db_path,
+        session_id,
     }
 }
 
@@ -79,6 +100,32 @@ fn main() {
             if let Err(e) = meta::write_meta(&args.meta_path, &exec_result) {
                 eprintln!("zsh-tool-exec: failed to write meta: {}", e);
             }
+
+            // ALAN recording (if --db provided)
+            if let (Some(ref db_path), Some(ref session_id)) =
+                (&args.db_path, &args.session_id)
+            {
+                match alan::open_db(db_path) {
+                    Ok(conn) => {
+                        if let Err(e) = alan::record(
+                            &conn,
+                            session_id,
+                            &args.command,
+                            exec_result.exit_code,
+                            exec_result.elapsed_ms,
+                            exec_result.timed_out,
+                            "", // stdout snippet — executor streams to parent, doesn't buffer
+                            &exec_result.pipestatus,
+                        ) {
+                            eprintln!("zsh-tool-exec: alan record failed: {}", e);
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("zsh-tool-exec: alan db open failed: {}", e);
+                    }
+                }
+            }
+
             process::exit(exec_result.exit_code);
         }
         Err(e) => {
