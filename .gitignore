@@ -44,3 +44,6 @@ _reference/
 # Upgrade work subdirs
 alan-upgrade-feb-eleven/
 future_trippin.md
+
+# Design/plan documents (local only)
+docs/plans/

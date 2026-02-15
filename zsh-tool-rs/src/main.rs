@@ -1,16 +1,19 @@
 use std::env;
 use std::process;
 
-mod alan;
-mod executor;
-mod meta;
+use zsh_tool_exec::alan;
+use zsh_tool_exec::executor;
+use zsh_tool_exec::meta;
+use zsh_tool_exec::serve;
 
 fn print_usage() {
-    eprintln!("Usage: zsh-tool-exec --meta <path> [--timeout <secs>] [--pty] [--db <path> --session-id <id>] -- <command>");
+    eprintln!("Usage:");
+    eprintln!("  zsh-tool serve                          — MCP server over stdio");
+    eprintln!("  zsh-tool exec --meta <path> [--timeout <secs>] [--pty] [--db <path> --session-id <id>] -- <command>");
     process::exit(2);
 }
 
-struct Args {
+struct ExecArgs {
     meta_path: String,
     timeout_secs: u64,
     pty: bool,
@@ -19,8 +22,7 @@ struct Args {
     session_id: Option<String>,
 }
 
-fn parse_args() -> Args {
-    let args: Vec<String> = env::args().skip(1).collect();
+fn parse_exec_args(args: &[String]) -> ExecArgs {
     let mut meta_path = String::new();
     let mut timeout_secs: u64 = 120;
     let mut pty = false;
@@ -64,7 +66,6 @@ fn parse_args() -> Args {
             "--pty" => pty = true,
             "--" => after_dashdash = true,
             _ => {
-                // If no --, treat remaining as command
                 command = args[i..].join(" ");
                 break;
             }
@@ -76,7 +77,7 @@ fn parse_args() -> Args {
         print_usage();
     }
 
-    Args {
+    ExecArgs {
         meta_path,
         timeout_secs,
         pty,
@@ -86,9 +87,7 @@ fn parse_args() -> Args {
     }
 }
 
-fn main() {
-    let args = parse_args();
-
+fn run_exec(args: ExecArgs) {
     let result = if args.pty {
         executor::execute_pty(&args.command, args.timeout_secs)
     } else {
@@ -98,7 +97,7 @@ fn main() {
     match result {
         Ok(exec_result) => {
             if let Err(e) = meta::write_meta(&args.meta_path, &exec_result) {
-                eprintln!("zsh-tool-exec: failed to write meta: {}", e);
+                eprintln!("zsh-tool exec: failed to write meta: {}", e);
             }
 
             // ALAN recording (if --db provided)
@@ -114,14 +113,14 @@ fn main() {
                             exec_result.exit_code,
                             exec_result.elapsed_ms,
                             exec_result.timed_out,
-                            "", // stdout snippet — executor streams to parent, doesn't buffer
+                            "",
                             &exec_result.pipestatus,
                         ) {
-                            eprintln!("zsh-tool-exec: alan record failed: {}", e);
+                            eprintln!("zsh-tool exec: alan record failed: {}", e);
                         }
                     }
                     Err(e) => {
-                        eprintln!("zsh-tool-exec: alan db open failed: {}", e);
+                        eprintln!("zsh-tool exec: alan db open failed: {}", e);
                     }
                 }
             }
@@ -136,8 +135,36 @@ fn main() {
                 timed_out: false,
             };
             let _ = meta::write_meta(&args.meta_path, &err_result);
-            eprintln!("zsh-tool-exec: {}", e);
+            eprintln!("zsh-tool exec: {}", e);
             process::exit(127);
+        }
+    }
+}
+
+fn main() {
+    let args: Vec<String> = env::args().collect();
+
+    if args.len() < 2 {
+        print_usage();
+    }
+
+    match args[1].as_str() {
+        "serve" => {
+            serve::run_server();
+        }
+        "exec" => {
+            let exec_args = parse_exec_args(&args[2..]);
+            run_exec(exec_args);
+        }
+        // Backwards compat: if first arg is --meta, treat as exec mode
+        "--meta" => {
+            let exec_args = parse_exec_args(&args[1..]);
+            run_exec(exec_args);
+        }
+        _ => {
+            // Try legacy mode (no subcommand)
+            let exec_args = parse_exec_args(&args[1..]);
+            run_exec(exec_args);
         }
     }
 }

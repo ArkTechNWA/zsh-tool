@@ -50,6 +50,9 @@ SKIP_PATTERNS = [
     r'build/',
     r'uv\.lock$',
     r'\.pyc$',
+    r'_reference/',
+    r'docs/plans/',
+    r'Cargo\.lock$',
 ]
 
 # Line-level exclusions (changelog entries, comments about old versions, etc.)

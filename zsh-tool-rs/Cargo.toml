@@ -4,6 +4,10 @@ version = "0.5.1"
 edition = "2021"
 description = "fd 3 sideband executor for zsh-tool"
 
+[lib]
+name = "zsh_tool_exec"
+path = "src/lib.rs"
+
 [[bin]]
 name = "zsh-tool-exec"
 path = "src/main.rs"
@@ -21,3 +25,4 @@ uuid = { version = "1", features = ["v4"] }
 
 [dev-dependencies]
 rusqlite = { version = "0.32", features = ["bundled"] }
+tempfile = "3"

@@ -1,16 +1,14 @@
 #!/usr/bin/env bash
 # zsh-tool MCP server launcher
-# Auto-creates venv and installs on first run
+# Builds and runs the Rust binary in serve mode
 
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_ROOT="$(dirname "$SCRIPT_DIR")"
-VENV_DIR="${PLUGIN_ROOT}/.venv"
-PYTHON="${VENV_DIR}/bin/python"
+BINARY="${PLUGIN_ROOT}/zsh-tool-rs/target/release/zsh-tool-exec"
 
 # Handle ALAN_DB_PATH for both local dev and marketplace installs
-# If ALAN_DB_PATH contains unexpanded variables or isn't set, use default
 if [[ -z "$ALAN_DB_PATH" || "$ALAN_DB_PATH" == *'${'* ]]; then
     export ALAN_DB_PATH="${PLUGIN_ROOT}/data/alan.db"
     echo "zsh-tool: Using default ALAN_DB_PATH: $ALAN_DB_PATH" >&2
@@ -19,14 +17,11 @@ fi
 # Ensure data directory exists
 mkdir -p "$(dirname "$ALAN_DB_PATH")"
 
-# Create venv if missing
-if [ ! -f "$PYTHON" ]; then
-    echo "zsh-tool: Creating virtual environment..." >&2
-    python3 -m venv "$VENV_DIR"
-    "$PYTHON" -m pip install --quiet --upgrade pip
-    "$PYTHON" -m pip install --quiet -e "$PLUGIN_ROOT"
-    echo "zsh-tool: Installation complete." >&2
+# Build if binary missing or older than source
+if [ ! -f "$BINARY" ] || [ "$(find "${PLUGIN_ROOT}/zsh-tool-rs/src" -newer "$BINARY" 2>/dev/null | head -1)" ]; then
+    echo "zsh-tool: Building Rust binary..." >&2
+    (cd "${PLUGIN_ROOT}/zsh-tool-rs" && cargo build --release --quiet 2>&1) >&2
+    echo "zsh-tool: Build complete." >&2
 fi
 
-# Run the MCP server
-exec "$PYTHON" -c "from zsh_tool.server import run; run()"
+exec "$BINARY" serve
