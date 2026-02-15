@@ -53,6 +53,8 @@ SKIP_PATTERNS = [
     r'_reference/',
     r'docs/plans/',
     r'Cargo\.lock$',
+    r'\.cargo/',
+    r'target/',
 ]
 
 # Line-level exclusions (changelog entries, comments about old versions, etc.)

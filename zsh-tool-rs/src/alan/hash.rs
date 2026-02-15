@@ -66,7 +66,7 @@ pub fn template_command(command: &str) -> String {
             // Replace arguments with wildcards, keep flags
             if part.starts_with('-') {
                 template_parts.push(part.to_string());
-            } else if template_parts.last().map_or(true, |l| l != "*") {
+            } else if template_parts.last().is_none_or(|l| l != "*") {
                 template_parts.push("*".to_string());
             }
         }
