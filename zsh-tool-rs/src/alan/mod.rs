@@ -2,7 +2,12 @@ use rusqlite::Connection;
 use std::path::Path;
 
 pub mod hash;
+pub mod insights;
+pub mod manopt;
 pub mod pipeline;
+pub mod prune;
+pub mod ssh;
+pub mod stats;
 pub mod streak;
 
 /// Open (or create) the ALAN database and ensure schema exists.
@@ -16,7 +21,7 @@ pub fn open_db(db_path: &str) -> Result<Connection, String> {
     Ok(conn)
 }
 
-fn init_schema(conn: &Connection) -> Result<(), String> {
+pub fn init_schema(conn: &Connection) -> Result<(), String> {
     conn.execute_batch(
         "
         -- Original observations table (pattern learning)
@@ -180,6 +185,9 @@ pub fn record(
 
     // Update streak
     streak::update_streak(conn, &command_hash, success, now)?;
+
+    // SSH-specific dual recording
+    ssh::record_ssh(conn, &observation_id, command, exit_code, duration_ms, timed_out)?;
 
     // Pipeline segment recording (if multi-pipe)
     if pipestatus.len() > 1 {
