@@ -15,32 +15,11 @@
     "source": "github"
   },
   "license": "MIT",
-  "version": "0.5.1",
+  "version": "0.6.0",
   "authors": [
     {
       "name": "ArkTechNWA",
       "url": "https://github.com/ArkTechNWA"
-    }
-  ],
-  "packages": [
-    {
-      "registryType": "pypi",
-      "registryBaseUrl": "https://pypi.org",
-      "identifier": "zsh-tool-mcp",
-      "version": "0.5.1",
-      "runtimeHint": "uvx",
-      "transport": {
-        "type": "stdio"
-      },
-      "environmentVariables": [
-        {
-          "name": "ALAN_DB_PATH",
-          "description": "Path to A.L.A.N. SQLite database",
-          "isRequired": false,
-          "format": "string",
-          "isSecret": false
-        }
-      ]
     }
   ],
   "tools": [
@@ -50,6 +29,8 @@
     {"name": "zsh_kill", "description": "Kill a running task"},
     {"name": "zsh_tasks", "description": "List all active tasks"},
     {"name": "zsh_health", "description": "Health status with NEVERHANG and A.L.A.N. metrics"},
+    {"name": "zsh_alan_stats", "description": "A.L.A.N. database statistics"},
+    {"name": "zsh_alan_query", "description": "Query pattern insights for a command"},
     {"name": "zsh_neverhang_status", "description": "Circuit breaker state"},
     {"name": "zsh_neverhang_reset", "description": "Reset circuit breaker"}
   ]
