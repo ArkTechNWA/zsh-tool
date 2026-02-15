@@ -116,6 +116,7 @@ pub fn init_schema(conn: &Connection) -> Result<(), String> {
 /// This is the core write path — observations, recent_commands, streaks,
 /// and pipeline segments. SSH recording and manopt stay in Python.
 /// TODO(phase3): port SSH recording and manopt triggering to Rust.
+#[allow(clippy::too_many_arguments)]
 pub fn record(
     conn: &Connection,
     session_id: &str,

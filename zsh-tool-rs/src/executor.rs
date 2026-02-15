@@ -14,8 +14,7 @@ fn wrap_command(command: &str) -> String {
 
 /// Parse pipestatus string "1 0 0" into Vec<i32>.
 fn parse_pipestatus(raw: &str) -> Vec<i32> {
-    raw.trim()
-        .split_whitespace()
+    raw.split_whitespace()
         .filter_map(|s| s.parse::<i32>().ok())
         .collect()
 }

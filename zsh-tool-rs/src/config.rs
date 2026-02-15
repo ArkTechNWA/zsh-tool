@@ -67,13 +67,10 @@ impl Config {
                 if let Some((key, value)) = line.split_once(':') {
                     let key = key.trim();
                     let value = value.trim();
-                    match key {
-                        "yield_after" => {
-                            if let Ok(v) = value.parse() {
-                                cfg.yield_after_default = v;
-                            }
+                    if key == "yield_after" {
+                        if let Ok(v) = value.parse() {
+                            cfg.yield_after_default = v;
                         }
-                        _ => {} // Ignore unknown keys for now
                     }
                 }
             }

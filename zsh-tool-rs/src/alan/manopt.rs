@@ -118,8 +118,8 @@ fn extract_options_section(text: &str) -> Vec<String> {
     for name in &preferred {
         if let Some(ranges) = section_ranges.get(name) {
             for &(start, end) in ranges {
-                for i in start..end {
-                    result.push(lines[i].to_string());
+                for line in lines.iter().take(end).skip(start) {
+                    result.push(line.to_string());
                 }
             }
         }
@@ -129,8 +129,8 @@ fn extract_options_section(text: &str) -> Vec<String> {
         for name in &fallback {
             if let Some(ranges) = section_ranges.get(name) {
                 for &(start, end) in ranges {
-                    for i in start..end {
-                        result.push(lines[i].to_string());
+                    for line in lines.iter().take(end).skip(start) {
+                        result.push(line.to_string());
                     }
                 }
             }
