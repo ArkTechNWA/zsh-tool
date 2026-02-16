@@ -12,7 +12,7 @@
 
 Zsh execution tool for Claude Code with full Bash parity, yield-based oversight, PTY mode, NEVERHANG circuit breaker, and A.L.A.N. short-term learning.
 
-**Status:** Beta (v0.6.0)
+**Status:** Beta (v0.6.1)
 
 **Author:** Claude + Meldrey
 
@@ -279,6 +279,12 @@ To use zsh as the only shell, add to `~/.claude/settings.json`:
 ---
 
 ## Changelog
+
+### 0.6.1
+**Protocol Fix** — *Bare JSON-RPC support for Claude Code v2.1+*
+- **Fix:** MCP server now auto-detects bare newline-delimited JSON (Claude Code v2.1.42+) vs Content-Length framing
+- **Debug logging:** stderr diagnostics for protocol negotiation, request/response lifecycle, shutdown
+- **Log file:** `run-mcp.sh` redirects stderr to `/tmp/zsh-tool-mcp.log` for MCP debugging
 
 ### 0.6.0
 **Full Rust Rewrite** — *Goodbye Python, hello speed*

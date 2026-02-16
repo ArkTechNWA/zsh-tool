@@ -24,4 +24,9 @@ if [ ! -f "$BINARY" ] || [ "$(find "${PLUGIN_ROOT}/zsh-tool-rs/src" -newer "$BIN
     echo "zsh-tool: Build complete." >&2
 fi
 
-exec "$BINARY" serve
+LOGFILE="/tmp/zsh-tool-mcp.log"
+echo "--- $(date) --- PID $$ ---" >> "$LOGFILE"
+echo "PLUGIN_ROOT=$PLUGIN_ROOT" >> "$LOGFILE"
+echo "BINARY=$BINARY" >> "$LOGFILE"
+echo "ALAN_DB_PATH=$ALAN_DB_PATH" >> "$LOGFILE"
+exec "$BINARY" serve 2>> "$LOGFILE"

@@ -56,7 +56,10 @@ pub struct TaskInfo {
 
 /// Run the MCP server on stdio.
 pub fn run_server() {
+    eprintln!("[zsh-tool] Starting MCP server v{}", env!("CARGO_PKG_VERSION"));
     let config = Config::load();
+    eprintln!("[zsh-tool] Config loaded: db={}, timeout={}, yield_after={}",
+        config.alan_db_path, config.neverhang_timeout_default, config.yield_after_default);
     let cb = CircuitBreaker::new(
         config.neverhang_failure_threshold,
         config.neverhang_recovery_timeout,
@@ -73,6 +76,7 @@ pub fn run_server() {
         config,
     });
 
+    eprintln!("[zsh-tool] Session {} — waiting for requests on stdin", state.session_id);
     let stdin = io::stdin();
     let mut reader = stdin.lock();
     let stdout = io::stdout();
@@ -81,13 +85,16 @@ pub fn run_server() {
     while let Some(request) = read_message(&mut reader) {
         // Notifications (no id) — just acknowledge
         if request.id.is_none() {
-            // notifications/initialized, notifications/cancelled, etc.
+            eprintln!("[zsh-tool] Notification: {}", request.method);
             continue;
         }
 
+        eprintln!("[zsh-tool] Request: {} (id={:?})", request.method, request.id);
         let response = handle_request(&state, &request.method, request.id.clone(), request.params);
         write_message(&mut writer, &response);
+        eprintln!("[zsh-tool] Response sent for: {}", request.method);
     }
+    eprintln!("[zsh-tool] stdin closed — shutting down");
 }
 
 fn handle_request(

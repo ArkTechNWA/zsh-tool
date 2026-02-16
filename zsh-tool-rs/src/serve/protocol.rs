@@ -1,7 +1,14 @@
 //! MCP JSON-RPC 2.0 protocol types and framing.
+//!
+//! Supports both Content-Length framed and bare newline-delimited JSON.
+//! Auto-detects on first message; responds in the same format.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::sync::atomic::{AtomicBool, Ordering};
+
+/// Whether the client uses bare JSON (no Content-Length framing).
+static BARE_JSON_MODE: AtomicBool = AtomicBool::new(false);
 
 /// JSON-RPC 2.0 request.
 #[derive(Debug, Deserialize)]
@@ -101,43 +108,124 @@ pub fn error_content(text: &str) -> Value {
     })
 }
 
-/// Read a JSON-RPC message from stdin using Content-Length framing.
+/// Read a JSON-RPC message from stdin.
+/// Auto-detects bare JSON lines vs Content-Length framing.
 /// Returns None on EOF.
 pub fn read_message(reader: &mut impl std::io::BufRead) -> Option<JsonRpcRequest> {
-    // Read headers until empty line
-    let mut content_length: Option<usize> = None;
-    loop {
-        let mut line = String::new();
-        match reader.read_line(&mut line) {
-            Ok(0) => return None, // EOF
-            Ok(_) => {
-                let line = line.trim();
-                if line.is_empty() {
-                    break; // End of headers
-                }
-                if let Some(len_str) = line.strip_prefix("Content-Length:") {
-                    content_length = len_str.trim().parse().ok();
-                }
-                // Ignore other headers
-            }
-            Err(_) => return None,
+    let mut line = String::new();
+    match reader.read_line(&mut line) {
+        Ok(0) => {
+            eprintln!("[zsh-tool:proto] EOF on stdin");
+            return None;
+        }
+        Ok(_) => {}
+        Err(e) => {
+            eprintln!("[zsh-tool:proto] Read error: {}", e);
+            return None;
         }
     }
 
-    let length = content_length?;
+    let trimmed = line.trim();
+    if trimmed.is_empty() {
+        // Blank line — try again (could be between messages)
+        return read_message(reader);
+    }
 
-    // Read exactly `length` bytes
-    let mut body = vec![0u8; length];
-    reader.read_exact(&mut body).ok()?;
+    // Detect: does this line start with '{' (bare JSON) or 'Content-Length:' (framed)?
+    if trimmed.starts_with('{') {
+        // Bare JSON mode
+        if !BARE_JSON_MODE.load(Ordering::Relaxed) {
+            eprintln!("[zsh-tool:proto] Detected bare JSON mode");
+            BARE_JSON_MODE.store(true, Ordering::Relaxed);
+        }
+        match serde_json::from_str(trimmed) {
+            Ok(req) => Some(req),
+            Err(e) => {
+                eprintln!("[zsh-tool:proto] JSON parse error: {} — line: {:?}", e, trimmed);
+                None
+            }
+        }
+    } else if let Some(len_str) = trimmed.strip_prefix("Content-Length:") {
+        // Content-Length framed mode
+        let content_length: usize = match len_str.trim().parse() {
+            Ok(l) => l,
+            Err(_) => {
+                eprintln!("[zsh-tool:proto] Bad Content-Length: {:?}", len_str.trim());
+                return None;
+            }
+        };
+        eprintln!("[zsh-tool:proto] Content-Length: {}", content_length);
 
-    serde_json::from_slice(&body).ok()
+        // Read remaining headers until empty line
+        loop {
+            let mut header = String::new();
+            match reader.read_line(&mut header) {
+                Ok(0) => {
+                    eprintln!("[zsh-tool:proto] EOF during headers");
+                    return None;
+                }
+                Ok(_) => {
+                    if header.trim().is_empty() {
+                        break;
+                    }
+                }
+                Err(e) => {
+                    eprintln!("[zsh-tool:proto] Header read error: {}", e);
+                    return None;
+                }
+            }
+        }
+
+        // Read body
+        let mut body = vec![0u8; content_length];
+        if let Err(e) = std::io::Read::read_exact(reader, &mut body) {
+            eprintln!("[zsh-tool:proto] Body read error: {} (expected {} bytes)", e, content_length);
+            return None;
+        }
+
+        match serde_json::from_slice(&body) {
+            Ok(req) => Some(req),
+            Err(e) => {
+                eprintln!("[zsh-tool:proto] JSON parse error: {} — body: {:?}",
+                    e, String::from_utf8_lossy(&body));
+                None
+            }
+        }
+    } else {
+        eprintln!("[zsh-tool:proto] Unexpected line: {:?}", trimmed);
+        None
+    }
 }
 
-/// Write a JSON-RPC response to stdout with Content-Length framing.
+/// Write a JSON-RPC response to stdout.
+/// Uses bare JSON or Content-Length framing to match the client.
 pub fn write_message(writer: &mut impl std::io::Write, response: &JsonRpcResponse) {
     let body = serde_json::to_string(response).unwrap_or_default();
-    let header = format!("Content-Length: {}\r\n\r\n", body.len());
-    let _ = writer.write_all(header.as_bytes());
-    let _ = writer.write_all(body.as_bytes());
-    let _ = writer.flush();
+    eprintln!("[zsh-tool:proto] Writing {} bytes (bare={})", body.len(), BARE_JSON_MODE.load(Ordering::Relaxed));
+
+    if BARE_JSON_MODE.load(Ordering::Relaxed) {
+        // Bare JSON: one line + newline
+        if let Err(e) = writer.write_all(body.as_bytes()) {
+            eprintln!("[zsh-tool:proto] Write error: {}", e);
+            return;
+        }
+        if let Err(e) = writer.write_all(b"\n") {
+            eprintln!("[zsh-tool:proto] Newline write error: {}", e);
+            return;
+        }
+    } else {
+        // Content-Length framed
+        let header = format!("Content-Length: {}\r\n\r\n", body.len());
+        if let Err(e) = writer.write_all(header.as_bytes()) {
+            eprintln!("[zsh-tool:proto] Header write error: {}", e);
+            return;
+        }
+        if let Err(e) = writer.write_all(body.as_bytes()) {
+            eprintln!("[zsh-tool:proto] Body write error: {}", e);
+            return;
+        }
+    }
+    if let Err(e) = writer.flush() {
+        eprintln!("[zsh-tool:proto] Flush error: {}", e);
+    }
 }
