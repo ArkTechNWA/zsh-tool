@@ -6,6 +6,10 @@ include:
     file: '/templates/failure-issue.yml'
   - project: 'arktechnwa/ci-utils'
     file: '/templates/ops-controls.yml'
+  - project: 'arktechnwa/ci-utils'
+    file: '/templates/secret-detection.yml'
+  - project: 'arktechnwa/ci-utils'
+    file: '/templates/readme-scaffold.yml'
 
 stages:
   - test
