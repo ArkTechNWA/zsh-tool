@@ -1,14 +1,17 @@
-# GitLab CI: Test, Lint, and Sync
+# GitLab CI: Test, Lint, Sync, and Ops Controls
 # Rust-native pipeline — no Python except version-check
 
 include:
   - project: 'arktechnwa/ci-utils'
     file: '/templates/failure-issue.yml'
+  - project: 'arktechnwa/ci-utils'
+    file: '/templates/ops-controls.yml'
 
 stages:
   - test
   - lint
   - sync
+  - ops
 
 variables:
   GITHUB_REPO: "git@github.com:ArkTechNWA/zsh-tool.git"
