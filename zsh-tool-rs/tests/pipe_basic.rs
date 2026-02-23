@@ -137,3 +137,50 @@ fn test_no_trailing_newline_output_preserved() {
 
     let _ = fs::remove_file(meta);
 }
+
+#[test]
+fn test_heredoc_does_not_leak_pipestatus_into_file() {
+    // Issue #42: heredoc content must not include pipestatus echo machinery.
+    let meta = "/tmp/zsh-test-heredoc.json";
+    let out_file = "/tmp/zsh-test-heredoc-output.txt";
+    let _ = fs::remove_file(meta);
+    let _ = fs::remove_file(out_file);
+
+    let command = format!("cat > {} <<'ZSHEOF'\nhello world\nZSHEOF", out_file);
+
+    let output = Command::new(exec_path())
+        .args(["--meta", meta, "--", &command])
+        .output()
+        .expect("failed to run");
+
+    assert!(output.status.success(), "heredoc command failed: {:?}", output);
+
+    let content = fs::read_to_string(out_file).expect("output file missing");
+    assert_eq!(content, "hello world\n", "heredoc content corrupted: {:?}", content);
+
+    let meta_content = fs::read_to_string(meta).expect("meta file missing");
+    let v: serde_json::Value = serde_json::from_str(&meta_content).expect("invalid json");
+    assert_eq!(v["pipestatus"], serde_json::json!([0]));
+
+    let _ = fs::remove_file(meta);
+    let _ = fs::remove_file(out_file);
+}
+
+#[test]
+fn test_multiline_command_no_pipestatus_leak() {
+    // Issue #34: multi-statement commands must not bleed metadata to stdout.
+    let meta = "/tmp/zsh-test-multiline.json";
+    let _ = fs::remove_file(meta);
+
+    let output = Command::new(exec_path())
+        .args(["--meta", meta, "--", "echo line1\necho line2\necho line3"])
+        .output()
+        .expect("failed to run");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("line1") && stdout.contains("line2") && stdout.contains("line3"));
+    assert!(!stdout.contains("pipestatus"), "metadata leaked: {}", stdout);
+    assert!(!stdout.contains(">&3"), "fd3 redirect leaked: {}", stdout);
+
+    let _ = fs::remove_file(meta);
+}
