@@ -9,7 +9,10 @@ use crate::meta::ExecResult;
 
 /// Wrap command to send pipestatus to fd 3.
 fn wrap_command(command: &str) -> String {
-    format!("{}; echo \"${{pipestatus[*]}}\" >&3", command)
+    // EXIT trap instead of appending after command.
+    // Appending breaks heredocs: "EOF; echo..." is not a valid terminator.
+    // The trap fires after shell exit regardless of command structure.
+    format!("trap 'echo \"${{pipestatus[*]}}\" >&3' EXIT\n{}", command)
 }
 
 /// Parse pipestatus string "1 0 0" into Vec<i32>.
@@ -147,10 +150,19 @@ pub fn execute_pipe(command: &str, timeout_secs: u64) -> Result<ExecResult, Stri
     }
 
     let mut pipestatus = parse_pipestatus(&meta_raw);
-    // If pipestatus is empty (e.g. `exit N` killed the shell before the
-    // echo >&3 ran), synthesize it from the process exit code.
+    // If pipestatus is empty (e.g. the shell exited before the trap could run),
+    // synthesize it from the process exit code.
     if pipestatus.is_empty() {
         pipestatus.push(exit_code);
+    }
+    // The EXIT trap fires when the shell exits, but for "exit N" the trap
+    // captures $pipestatus of the last pipeline — which is 0 for the exit
+    // builtin itself. If the trap says 0 but the process actually exited
+    // non-zero, trust the process exit code (it's the authoritative value).
+    if let Some(last) = pipestatus.last_mut() {
+        if *last == 0 && exit_code != 0 {
+            *last = exit_code;
+        }
     }
     let final_exit = *pipestatus.last().unwrap();
 
@@ -304,6 +316,14 @@ pub fn execute_pty(command: &str, timeout_secs: u64) -> Result<ExecResult, Strin
             let mut pipestatus = parse_pipestatus(&meta_raw);
             if pipestatus.is_empty() {
                 pipestatus.push(raw_exit_code);
+            }
+            // Same correction as execute_pipe: the EXIT trap sees pipestatus=[0]
+            // for "exit N" since the builtin exits with status 0. Trust the
+            // process exit code when there's a mismatch.
+            if let Some(last) = pipestatus.last_mut() {
+                if *last == 0 && raw_exit_code != 0 {
+                    *last = raw_exit_code;
+                }
             }
             let final_exit = *pipestatus.last().unwrap();
 
