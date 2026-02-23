@@ -20,6 +20,14 @@ use protocol::{
     error_content, initialize_result, read_message, text_content, write_message, JsonRpcResponse,
 };
 
+/// A background task that finished while the caller wasn't watching.
+#[derive(Debug, Clone)]
+pub struct CompletedEvent {
+    pub task_id: String,
+    pub exit_code: i32,
+    pub elapsed: f64,
+}
+
 /// Shared server state.
 pub struct ServerState {
     pub config: Config,
@@ -27,6 +35,7 @@ pub struct ServerState {
     pub session_id: String,
     pub db_path: String,
     pub tasks: Mutex<TaskRegistry>,
+    pub event_queue: Mutex<Vec<CompletedEvent>>,
 }
 
 /// Active task registry.
@@ -42,6 +51,7 @@ pub struct TaskInfo {
     pub started_at_epoch: f64,
     pub status: String,
     pub output_buffer: String,
+    pub last_poll_offset: usize,
     pub has_stdin: bool,
     pub pipestatus: Vec<i32>,
     pub pid: Option<u32>,
@@ -73,6 +83,7 @@ pub fn run_server() {
         tasks: Mutex::new(TaskRegistry {
             tasks: HashMap::new(),
         }),
+        event_queue: Mutex::new(Vec::new()),
         config,
     });
 
@@ -136,7 +147,7 @@ fn handle_request(
 }
 
 fn handle_tool_call(state: &Arc<ServerState>, tool_name: &str, args: &Value) -> Value {
-    match tool_name {
+    let result = match tool_name {
         "zsh" => handle_zsh(state, args),
         "zsh_poll" => handle_poll(state, args),
         "zsh_send" => handle_send(state, args),
@@ -147,8 +158,9 @@ fn handle_tool_call(state: &Arc<ServerState>, tool_name: &str, args: &Value) -> 
         "zsh_alan_query" => handle_alan_query(state, args),
         "zsh_neverhang_status" => handle_neverhang_status(state),
         "zsh_neverhang_reset" => handle_neverhang_reset(state),
-        _ => error_content(&format!("Unknown tool: {}", tool_name)),
-    }
+        _ => return error_content(&format!("Unknown tool: {}", tool_name)),
+    };
+    prepend_events(state, result)
 }
 
 // ANSI color constants
@@ -210,13 +222,25 @@ fn format_task_output(result: &serde_json::Map<String, Value>) -> Value {
                 .get("has_stdin")
                 .and_then(|v| v.as_bool())
                 .unwrap_or(false);
+            let new_bytes = result
+                .get("new_bytes")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+            let delta_str = if new_bytes >= 1024 {
+                format!(" — {:.1} KB new", new_bytes as f64 / 1024.0)
+            } else if new_bytes > 0 {
+                format!(" — {} B new", new_bytes)
+            } else {
+                String::new()
+            };
             parts.push(format!(
-                "{}[RUNNING{} task_id={} elapsed={:.1}s stdin={}{}]{}",
+                "{}[RUNNING{} task_id={} elapsed={:.1}s stdin={}{}{}]{}",
                 C_CYAN,
                 C_RESET,
                 task_id,
                 elapsed,
                 if has_stdin { "yes" } else { "no" },
+                delta_str,
                 C_CYAN,
                 C_RESET
             ));
@@ -338,6 +362,9 @@ fn read_available(stdout: &mut ChildStdout) -> String {
 }
 
 /// Finalize a completed task: read meta, compute insights, update circuit breaker, prune.
+/// `suppress_notification`: true when the caller is directly receiving this result
+/// (zsh immediate completion, zsh_poll). false for tasks that finished in the background
+/// and should notify on the next unrelated tool call.
 fn finalize_task(
     state: &Arc<ServerState>,
     task_id: &str,
@@ -346,6 +373,7 @@ fn finalize_task(
     elapsed: f64,
     pre_insights: &[(String, String)],
     meta_path: &str,
+    suppress_notification: bool,
 ) -> Value {
     // Read meta.json for pipestatus
     let meta = std::fs::read_to_string(meta_path)
@@ -395,6 +423,10 @@ fn finalize_task(
     }
 
     let _ = std::fs::remove_file(meta_path);
+
+    if !suppress_notification {
+        enqueue_event(state, task_id, overall_exit, elapsed);
+    }
 
     let result = serde_json::json!({
         "success": overall_exit == 0,
@@ -540,7 +572,8 @@ fn handle_zsh(state: &Arc<ServerState>, args: &Value) -> Value {
                 let _ = stdout.read_to_string(&mut output);
             }
 
-            finalize_task(state, &task_id, command, &output, elapsed, &pre_insights, &meta_path)
+            // Caller receives this result directly — no background notification needed.
+            finalize_task(state, &task_id, command, &output, elapsed, &pre_insights, &meta_path, true)
         }
         Ok(None) => {
             // Still running — collect partial output and register task
@@ -568,6 +601,7 @@ fn handle_zsh(state: &Arc<ServerState>, args: &Value) -> Value {
                         started_at_epoch: now_epoch,
                         status: "running".to_string(),
                         output_buffer: output_so_far.clone(),
+                        last_poll_offset: 0,
                         has_stdin,
                         pipestatus: Vec::new(),
                         pid: Some(pid),
@@ -684,10 +718,14 @@ fn handle_poll(state: &Arc<ServerState>, args: &Value) -> Value {
         // Drop the lock before finalize (it accesses circuit_breaker)
         drop(tasks);
 
-        return finalize_task(state, &task_id_str, &command, &output, elapsed, &pre_insights, &meta_path);
+        // Caller is actively polling — no background notification needed.
+        return finalize_task(state, &task_id_str, &command, &output, elapsed, &pre_insights, &meta_path, true);
     }
 
-    // Still running
+    // Still running — compute output delta since last poll
+    let new_bytes = task.output_buffer.len().saturating_sub(task.last_poll_offset);
+    task.last_poll_offset = task.output_buffer.len();
+
     let insights = combine_insights(&task.pre_insights, &[]);
     let result = serde_json::json!({
         "task_id": task.task_id,
@@ -695,6 +733,7 @@ fn handle_poll(state: &Arc<ServerState>, args: &Value) -> Value {
         "output": truncate_output(&task.output_buffer, state.config.truncate_output_at),
         "elapsed_seconds": format!("{:.1}", elapsed).parse::<f64>().unwrap_or(elapsed),
         "has_stdin": task.has_stdin,
+        "new_bytes": new_bytes,
         "insights": insights,
     });
     format_task_output(result.as_object().unwrap())
@@ -903,6 +942,55 @@ fn combine_insights(
         );
     }
     result
+}
+
+/// Enqueue a background task completion event for notification on next tool call.
+fn enqueue_event(state: &Arc<ServerState>, task_id: &str, exit_code: i32, elapsed: f64) {
+    state.event_queue.lock().unwrap().push(CompletedEvent {
+        task_id: task_id.to_string(),
+        exit_code,
+        elapsed,
+    });
+}
+
+/// Drain all pending completion events and return formatted notification lines.
+/// Events are consumed — each fires exactly once.
+fn drain_events(state: &Arc<ServerState>) -> String {
+    let mut queue = state.event_queue.lock().unwrap();
+    if queue.is_empty() {
+        return String::new();
+    }
+    let lines: Vec<String> = queue.drain(..).map(|ev| {
+        if ev.exit_code == 0 {
+            format!(
+                "{}[notify]{} task '{}' completed (exit=0, {:.1}s) — use zsh_poll to retrieve output",
+                C_DIM, C_RESET, ev.task_id, ev.elapsed
+            )
+        } else {
+            format!(
+                "{}[notify]{} task '{}' failed (exit={}, {:.1}s) — use zsh_poll to retrieve output",
+                C_YELLOW, C_RESET, ev.task_id, ev.exit_code, ev.elapsed
+            )
+        }
+    }).collect();
+    lines.join("\n")
+}
+
+/// Prepend any pending background task notifications to a tool response.
+fn prepend_events(state: &Arc<ServerState>, response: Value) -> Value {
+    let notifications = drain_events(state);
+    if notifications.is_empty() {
+        return response;
+    }
+    if let Some(text) = response.get("content")
+        .and_then(|c| c.as_array())
+        .and_then(|a| a.first())
+        .and_then(|v| v.get("text"))
+        .and_then(|t| t.as_str())
+    {
+        return text_content(&format!("{}\n\n{}", notifications, text));
+    }
+    response
 }
 
 fn truncate_output(output: &str, max_len: usize) -> String {
