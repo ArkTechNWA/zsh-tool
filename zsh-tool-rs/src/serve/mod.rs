@@ -146,7 +146,76 @@ fn handle_request(
     }
 }
 
+/// Data needed to finalize a completed task outside the tasks lock.
+type FinalizeArgs = (String, String, String, f64, Vec<(String, String)>, String);
+
+/// If `task_id` is running and its child has exited, drain stdout, mark completed,
+/// and return finalization arguments. Returns None if still running or not found.
+fn collect_if_done(
+    state: &Arc<ServerState>,
+    task_id: &str,
+) -> Option<FinalizeArgs> {
+    let mut tasks = state.tasks.lock().unwrap();
+    let task = tasks.tasks.get_mut(task_id)?;
+    if task.status != "running" {
+        return None;
+    }
+    let done = task.child.as_mut()
+        .and_then(|c| c.try_wait().ok().flatten())
+        .is_some();
+    if !done {
+        return None;
+    }
+    // Drain remaining output (switch to blocking for clean EOF)
+    if let Some(ref mut stdout) = task.stdout {
+        use std::io::Read;
+        #[cfg(unix)]
+        {
+            use std::os::unix::io::AsRawFd;
+            let fd = stdout.as_raw_fd();
+            unsafe {
+                let flags = libc::fcntl(fd, libc::F_GETFL);
+                libc::fcntl(fd, libc::F_SETFL, flags & !libc::O_NONBLOCK);
+            }
+        }
+        let mut remaining = String::new();
+        let _ = stdout.read_to_string(&mut remaining);
+        task.output_buffer.push_str(&remaining);
+    }
+    task.child = None;
+    task.stdout = None;
+    task.stdin = None;
+    task.status = "completed".to_string();
+    Some((
+        task.task_id.clone(),
+        task.command.clone(),
+        task.output_buffer.clone(),
+        task.started_at.elapsed().as_secs_f64(),
+        task.pre_insights.clone(),
+        task.meta_path.clone(),
+    ))
+}
+
+/// Proactively finalize any background tasks that completed without being polled.
+/// Called at the start of every tool call so completions are never missed.
+fn check_and_finalize_background_tasks(state: &Arc<ServerState>) {
+    let running_ids: Vec<String> = {
+        let tasks = state.tasks.lock().unwrap();
+        tasks.tasks.values()
+            .filter(|t| t.status == "running")
+            .map(|t| t.task_id.clone())
+            .collect()
+    };
+    for task_id in running_ids {
+        if let Some((tid, cmd, output, elapsed, pre, meta)) = collect_if_done(state, &task_id) {
+            // suppress_notification=false: background completion, enqueue notification
+            finalize_task(state, &tid, &cmd, &output, elapsed, &pre, &meta, false);
+        }
+    }
+}
+
 fn handle_tool_call(state: &Arc<ServerState>, tool_name: &str, args: &Value) -> Value {
+    check_and_finalize_background_tasks(state);
     let result = match tool_name {
         "zsh" => handle_zsh(state, args),
         "zsh_poll" => handle_poll(state, args),
@@ -365,6 +434,7 @@ fn read_available(stdout: &mut ChildStdout) -> String {
 /// `suppress_notification`: true when the caller is directly receiving this result
 /// (zsh immediate completion, zsh_poll). false for tasks that finished in the background
 /// and should notify on the next unrelated tool call.
+#[allow(clippy::too_many_arguments)]
 fn finalize_task(
     state: &Arc<ServerState>,
     task_id: &str,
@@ -665,6 +735,9 @@ fn handle_poll(state: &Arc<ServerState>, args: &Value) -> Value {
                 .parse::<f64>().unwrap_or(0.0),
             "pipestatus": task.pipestatus,
         });
+        // Caller is observing this task directly — clear any pending [notify] for it.
+        drop(tasks);
+        suppress_event_for_task(state, task_id);
         return format_task_output(result.as_object().unwrap());
     }
 
@@ -718,6 +791,8 @@ fn handle_poll(state: &Arc<ServerState>, args: &Value) -> Value {
         // Drop the lock before finalize (it accesses circuit_breaker)
         drop(tasks);
 
+        // Caller is observing this task directly — clear any pending [notify] for it.
+        suppress_event_for_task(state, &task_id_str);
         // Caller is actively polling — no background notification needed.
         return finalize_task(state, &task_id_str, &command, &output, elapsed, &pre_insights, &meta_path, true);
     }
@@ -951,6 +1026,13 @@ fn enqueue_event(state: &Arc<ServerState>, task_id: &str, exit_code: i32, elapse
         exit_code,
         elapsed,
     });
+}
+
+/// Remove any pending notification for a specific task.
+/// Called by zsh_poll so directly-observed completions don't also show as [notify].
+fn suppress_event_for_task(state: &Arc<ServerState>, task_id: &str) {
+    let mut queue = state.event_queue.lock().unwrap();
+    queue.retain(|ev| ev.task_id != task_id);
 }
 
 /// Drain all pending completion events and return formatted notification lines.
