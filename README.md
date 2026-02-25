@@ -12,7 +12,7 @@
 
 Zsh execution tool for Claude Code with full Bash parity, yield-based oversight, PTY mode, NEVERHANG circuit breaker, and A.L.A.N. short-term learning.
 
-**Status:** Beta (v0.6.1)
+**Status:** Beta (v0.6.2)
 
 **Author:** Claude + Meldrey
 
