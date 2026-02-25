@@ -420,3 +420,236 @@ fn test_yield_poll_complete() {
     drop(stdin);
     let _ = child.wait();
 }
+
+/// Helper: extract task_id from a RUNNING status line.
+fn extract_task_id(text: &str) -> String {
+    let start = text.find("task_id=").expect("no task_id in text") + 8;
+    let end = text[start..].find(' ').expect("no space after task_id") + start;
+    text[start..end].to_string()
+}
+
+#[test]
+fn test_background_completion_notifies_on_next_tool_call() {
+    // When a background task completes while the caller isn't watching,
+    // the NEXT tool call (any tool) should include a [notify] line.
+    let (mut stdin, mut reader, mut child) = spawn_server();
+
+    send_request(&mut stdin, "initialize", 1, None);
+    let _ = read_response(&mut reader);
+    send_notification(&mut stdin, "notifications/initialized");
+
+    // Command runs ~0.4s; yield_after=0.1s → yields RUNNING, then finishes in background.
+    send_request(
+        &mut stdin,
+        "tools/call",
+        2,
+        Some(serde_json::json!({
+            "name": "zsh",
+            "arguments": {
+                "command": "sleep 0.4 && echo notify-test",
+                "timeout": 10,
+                "yield_after": 0.1
+            }
+        })),
+    );
+
+    let resp = read_response(&mut reader);
+    let text = resp["result"]["content"][0]["text"].as_str().unwrap();
+    assert!(text.contains("RUNNING"), "should yield as RUNNING, got: {}", text);
+
+    // Wait well past command completion.
+    std::thread::sleep(Duration::from_millis(800));
+
+    // Call a completely unrelated tool. The response should contain a [notify] line
+    // reporting that the background task finished.
+    send_request(
+        &mut stdin,
+        "tools/call",
+        3,
+        Some(serde_json::json!({
+            "name": "zsh_health",
+            "arguments": {}
+        })),
+    );
+
+    let resp = read_response(&mut reader);
+    let text = resp["result"]["content"][0]["text"].as_str().unwrap();
+    assert!(
+        text.contains("[notify]"),
+        "Expected [notify] in next tool call response, got:\n{}", text
+    );
+    assert!(
+        text.contains("completed") || text.contains("failed"),
+        "Expected completed/failed status in notify, got:\n{}", text
+    );
+
+    // The notification should be fire-once: a second unrelated tool call should NOT
+    // include the same notification again.
+    send_request(
+        &mut stdin,
+        "tools/call",
+        4,
+        Some(serde_json::json!({
+            "name": "zsh_health",
+            "arguments": {}
+        })),
+    );
+
+    let resp = read_response(&mut reader);
+    let text = resp["result"]["content"][0]["text"].as_str().unwrap();
+    assert!(
+        !text.contains("[notify]"),
+        "Notification should fire only once, but appeared again:\n{}", text
+    );
+
+    drop(stdin);
+    let _ = child.wait();
+}
+
+#[test]
+fn test_direct_poll_does_not_generate_notification() {
+    // When the caller directly polls a task to completion via zsh_poll,
+    // no [notify] should appear on the next tool call (suppress_notification=true).
+    let (mut stdin, mut reader, mut child) = spawn_server();
+
+    send_request(&mut stdin, "initialize", 1, None);
+    let _ = read_response(&mut reader);
+    send_notification(&mut stdin, "notifications/initialized");
+
+    send_request(
+        &mut stdin,
+        "tools/call",
+        2,
+        Some(serde_json::json!({
+            "name": "zsh",
+            "arguments": {
+                "command": "sleep 0.4 && echo direct-poll-test",
+                "timeout": 10,
+                "yield_after": 0.1
+            }
+        })),
+    );
+
+    let resp = read_response(&mut reader);
+    let text = resp["result"]["content"][0]["text"].as_str().unwrap();
+    assert!(text.contains("RUNNING"), "should yield RUNNING, got: {}", text);
+    let task_id = extract_task_id(text);
+
+    std::thread::sleep(Duration::from_millis(800));
+
+    // Directly poll the task to completion
+    send_request(
+        &mut stdin,
+        "tools/call",
+        3,
+        Some(serde_json::json!({
+            "name": "zsh_poll",
+            "arguments": { "task_id": task_id }
+        })),
+    );
+
+    let resp = read_response(&mut reader);
+    let text = resp["result"]["content"][0]["text"].as_str().unwrap();
+    assert!(text.contains("COMPLETED"), "poll should return COMPLETED, got: {}", text);
+    assert!(!text.contains("[notify]"), "poll result should not contain [notify], got: {}", text);
+
+    // Next unrelated call should also have no notify (task was directly polled)
+    send_request(
+        &mut stdin,
+        "tools/call",
+        4,
+        Some(serde_json::json!({
+            "name": "zsh_health",
+            "arguments": {}
+        })),
+    );
+
+    let resp = read_response(&mut reader);
+    let text = resp["result"]["content"][0]["text"].as_str().unwrap();
+    assert!(
+        !text.contains("[notify]"),
+        "No notify expected after direct poll, got:\n{}", text
+    );
+
+    drop(stdin);
+    let _ = child.wait();
+}
+
+#[test]
+fn test_poll_running_task_shows_output_delta() {
+    // zsh_poll on a running task should report how many new bytes arrived
+    // since the last poll in the RUNNING status line.
+    let (mut stdin, mut reader, mut child) = spawn_server();
+
+    send_request(&mut stdin, "initialize", 1, None);
+    let _ = read_response(&mut reader);
+    send_notification(&mut stdin, "notifications/initialized");
+
+    send_request(
+        &mut stdin,
+        "tools/call",
+        2,
+        Some(serde_json::json!({
+            "name": "zsh",
+            "arguments": {
+                "command": "for i in 1 2 3 4 5; do echo \"output line $i\"; sleep 0.2; done",
+                "timeout": 30,
+                "yield_after": 0.1
+            }
+        })),
+    );
+
+    let resp = read_response(&mut reader);
+    let text = resp["result"]["content"][0]["text"].as_str().unwrap();
+    assert!(text.contains("RUNNING"), "should yield RUNNING, got: {}", text);
+    let task_id = extract_task_id(text);
+
+    // Let output accumulate
+    std::thread::sleep(Duration::from_millis(700));
+
+    // First poll — should show new bytes or output
+    send_request(
+        &mut stdin,
+        "tools/call",
+        3,
+        Some(serde_json::json!({
+            "name": "zsh_poll",
+            "arguments": { "task_id": task_id }
+        })),
+    );
+
+    let resp = read_response(&mut reader);
+    let text = resp["result"]["content"][0]["text"].as_str().unwrap();
+
+    if text.contains("RUNNING") {
+        let has_delta = text.contains(" new") || text.contains("output line");
+        assert!(has_delta, "Running poll should show output delta or content, got:\n{}", text);
+    } else {
+        assert!(text.contains("COMPLETED"), "unexpected status, got:\n{}", text);
+        assert!(text.contains("output line"), "output should be present, got:\n{}", text);
+    }
+
+    // Immediate re-poll: if still running, no new output means no delta marker
+    send_request(
+        &mut stdin,
+        "tools/call",
+        4,
+        Some(serde_json::json!({
+            "name": "zsh_poll",
+            "arguments": { "task_id": task_id }
+        })),
+    );
+
+    let resp = read_response(&mut reader);
+    let text = resp["result"]["content"][0]["text"].as_str().unwrap();
+    if text.contains("RUNNING") {
+        // delta_str only present when new_bytes > 0
+        assert!(
+            !text.contains("KB new") && !text.contains("B new"),
+            "immediate re-poll should show no delta, got:\n{}", text
+        );
+    }
+
+    drop(stdin);
+    let _ = child.wait();
+}
