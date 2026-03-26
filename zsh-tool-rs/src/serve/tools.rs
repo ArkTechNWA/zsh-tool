@@ -37,13 +37,17 @@ pub fn list_tools(timeout_default: u64, timeout_max: u64, yield_after: f64) -> V
                 })
             ),
             tool_def("zsh_poll",
-                "Get more output from a running task. Call repeatedly until status is not 'running'.",
+                "Get more output from a running task. Returns delta (new output since last poll) with global line numbers by default. Pass full_output=true for entire buffer. Call repeatedly until status is not 'running'.",
                 json!({
                     "type": "object",
                     "properties": {
                         "task_id": {
                             "type": "string",
                             "description": "Task ID returned from zsh command"
+                        },
+                        "full_output": {
+                            "type": "boolean",
+                            "description": "Return entire output buffer with line numbers instead of just the delta since last poll (default: false)"
                         }
                     },
                     "required": ["task_id"]

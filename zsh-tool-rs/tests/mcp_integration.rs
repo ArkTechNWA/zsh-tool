@@ -653,3 +653,194 @@ fn test_poll_running_task_shows_output_delta() {
     drop(stdin);
     let _ = child.wait();
 }
+
+#[test]
+fn test_poll_returns_delta_with_line_numbers() {
+    let (mut stdin, mut reader, mut child) = spawn_server();
+
+    send_request(&mut stdin, "initialize", 1, None);
+    let _ = read_response(&mut reader);
+    send_notification(&mut stdin, "notifications/initialized");
+
+    // Start a command that produces multiple lines over time
+    send_request(
+        &mut stdin,
+        "tools/call",
+        2,
+        Some(serde_json::json!({
+            "name": "zsh",
+            "arguments": {
+                "command": "for i in $(seq 1 10); do echo \"line-$i\"; sleep 0.15; done",
+                "timeout": 30,
+                "yield_after": 0.1
+            }
+        })),
+    );
+
+    let resp = read_response(&mut reader);
+    let text = resp["result"]["content"][0]["text"].as_str().unwrap();
+    assert!(text.contains("RUNNING"), "should yield RUNNING, got: {}", text);
+    let task_id = extract_task_id(text);
+
+    // Let some output accumulate
+    std::thread::sleep(Duration::from_millis(600));
+
+    // First poll — should get delta with line numbers starting at 1
+    send_request(
+        &mut stdin,
+        "tools/call",
+        3,
+        Some(serde_json::json!({
+            "name": "zsh_poll",
+            "arguments": { "task_id": task_id }
+        })),
+    );
+
+    let resp = read_response(&mut reader);
+    let text = resp["result"]["content"][0]["text"].as_str().unwrap();
+
+    // Should contain numbered lines like "1: line-1"
+    assert!(text.contains("1: "), "first poll should have line numbers starting at 1, got:\n{}", text);
+
+    if text.contains("RUNNING") {
+        // Let more output come
+        std::thread::sleep(Duration::from_millis(600));
+
+        // Second poll — line numbers should continue from where first poll left off
+        send_request(
+            &mut stdin,
+            "tools/call",
+            4,
+            Some(serde_json::json!({
+                "name": "zsh_poll",
+                "arguments": { "task_id": task_id }
+            })),
+        );
+
+        let resp = read_response(&mut reader);
+        let text2 = resp["result"]["content"][0]["text"].as_str().unwrap();
+
+        // Should NOT start at "1:" again — should continue from previous
+        if text2.contains("RUNNING") || text2.contains("COMPLETED") {
+            // If there's output, first line number should be > 1
+            let lines: Vec<&str> = text2.lines().collect();
+            if let Some(first_content_line) = lines.first() {
+                if first_content_line.contains(": line-") {
+                    assert!(
+                        !first_content_line.starts_with("1: "),
+                        "second poll should NOT restart at line 1, got:\n{}", text2
+                    );
+                }
+            }
+        }
+    }
+
+    // Wait for completion
+    std::thread::sleep(Duration::from_secs(2));
+
+    // Final poll with full_output=true — should have all lines numbered from 1
+    send_request(
+        &mut stdin,
+        "tools/call",
+        5,
+        Some(serde_json::json!({
+            "name": "zsh_poll",
+            "arguments": { "task_id": task_id, "full_output": true }
+        })),
+    );
+
+    let resp = read_response(&mut reader);
+    let text = resp["result"]["content"][0]["text"].as_str().unwrap();
+    assert!(text.contains("1: "), "full_output should start at line 1, got:\n{}", text);
+    assert!(text.contains("line-10"), "full_output should contain last line, got:\n{}", text);
+
+    drop(stdin);
+    let _ = child.wait();
+}
+
+#[test]
+fn test_poll_completion_returns_delta_not_full() {
+    let (mut stdin, mut reader, mut child) = spawn_server();
+
+    send_request(&mut stdin, "initialize", 1, None);
+    let _ = read_response(&mut reader);
+    send_notification(&mut stdin, "notifications/initialized");
+
+    send_request(
+        &mut stdin,
+        "tools/call",
+        2,
+        Some(serde_json::json!({
+            "name": "zsh",
+            "arguments": {
+                "command": "echo first-batch; sleep 0.3; echo second-batch; sleep 0.3; echo final-line",
+                "timeout": 10,
+                "yield_after": 0.1
+            }
+        })),
+    );
+
+    let resp = read_response(&mut reader);
+    let text = resp["result"]["content"][0]["text"].as_str().unwrap();
+    assert!(text.contains("RUNNING"), "should yield RUNNING, got: {}", text);
+    let task_id = extract_task_id(text);
+
+    // First poll while still running — consumes some output
+    std::thread::sleep(Duration::from_millis(400));
+    send_request(
+        &mut stdin,
+        "tools/call",
+        3,
+        Some(serde_json::json!({
+            "name": "zsh_poll",
+            "arguments": { "task_id": task_id }
+        })),
+    );
+
+    let resp = read_response(&mut reader);
+    let text1 = resp["result"]["content"][0]["text"].as_str().unwrap();
+    assert!(text1.contains("first-batch"), "first poll should have first-batch, got:\n{}", text1);
+
+    // Wait for completion
+    std::thread::sleep(Duration::from_secs(1));
+
+    // Poll again — catches completion, should return delta (not repeat first-batch)
+    send_request(
+        &mut stdin,
+        "tools/call",
+        4,
+        Some(serde_json::json!({
+            "name": "zsh_poll",
+            "arguments": { "task_id": task_id }
+        })),
+    );
+
+    let resp = read_response(&mut reader);
+    let text2 = resp["result"]["content"][0]["text"].as_str().unwrap();
+    assert!(text2.contains("COMPLETED") || text2.contains("FAILED"),
+        "should be completed, got:\n{}", text2);
+    assert!(text2.contains("final-line"), "completion poll should have final-line, got:\n{}", text2);
+    if text1.contains("first-batch") && !text1.contains("final-line") {
+        assert!(!text2.starts_with("1: "),
+            "completion delta should not restart at line 1, got:\n{}", text2);
+    }
+
+    // Re-poll completed task — should return empty delta
+    send_request(
+        &mut stdin,
+        "tools/call",
+        5,
+        Some(serde_json::json!({
+            "name": "zsh_poll",
+            "arguments": { "task_id": task_id }
+        })),
+    );
+
+    let resp = read_response(&mut reader);
+    let text3 = resp["result"]["content"][0]["text"].as_str().unwrap();
+    assert!(text3.contains("COMPLETED") || text3.contains("FAILED"),
+        "re-poll should still show completed, got:\n{}", text3);
+
+    drop(stdin);
+    let _ = child.wait();
+}

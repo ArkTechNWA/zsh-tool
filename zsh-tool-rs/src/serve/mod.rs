@@ -52,6 +52,7 @@ pub struct TaskInfo {
     pub status: String,
     pub output_buffer: String,
     pub last_poll_offset: usize,
+    pub last_poll_line: usize,  // global line count at last poll
     pub has_stdin: bool,
     pub pipestatus: Vec<i32>,
     pub pid: Option<u32>,
@@ -209,7 +210,7 @@ fn check_and_finalize_background_tasks(state: &Arc<ServerState>) {
     for task_id in running_ids {
         if let Some((tid, cmd, output, elapsed, pre, meta)) = collect_if_done(state, &task_id) {
             // suppress_notification=false: background completion, enqueue notification
-            finalize_task(state, &tid, &cmd, &output, elapsed, &pre, &meta, false);
+            finalize_task(state, &tid, &cmd, &output, elapsed, &pre, &meta, false, None);
         }
     }
 }
@@ -295,7 +296,18 @@ fn format_task_output(result: &serde_json::Map<String, Value>) -> Value {
                 .get("new_bytes")
                 .and_then(|v| v.as_u64())
                 .unwrap_or(0);
-            let delta_str = if new_bytes >= 1024 {
+            let from_line = result
+                .get("from_line")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+            let to_line = result
+                .get("to_line")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+
+            let delta_str = if from_line > 0 && to_line > 0 {
+                format!(" — lines {}-{}", from_line, to_line)
+            } else if new_bytes >= 1024 {
                 format!(" — {:.1} KB new", new_bytes as f64 / 1024.0)
             } else if new_bytes > 0 {
                 format!(" — {} B new", new_bytes)
@@ -444,6 +456,7 @@ fn finalize_task(
     pre_insights: &[(String, String)],
     meta_path: &str,
     suppress_notification: bool,
+    output_override: Option<(&str, usize, usize)>,  // (numbered_output, from_line, to_line)
 ) -> Value {
     // Read meta.json for pipestatus
     let meta = std::fs::read_to_string(meta_path)
@@ -498,15 +511,27 @@ fn finalize_task(
         enqueue_event(state, task_id, overall_exit, elapsed);
     }
 
-    let result = serde_json::json!({
+    let (final_output, from_line, to_line) = match output_override {
+        Some((numbered, fl, tl)) => (numbered.to_string(), fl, tl),
+        None => {
+            let out = truncate_output(output, state.config.truncate_output_at);
+            (out, 0, 0)
+        }
+    };
+
+    let mut result = serde_json::json!({
         "success": overall_exit == 0,
         "task_id": task_id,
         "status": "completed",
-        "output": truncate_output(output, state.config.truncate_output_at),
+        "output": final_output,
         "elapsed_seconds": format!("{:.1}", elapsed).parse::<f64>().unwrap_or(elapsed),
         "pipestatus": pipestatus,
         "insights": insights,
     });
+    if from_line > 0 {
+        result["from_line"] = serde_json::json!(from_line);
+        result["to_line"] = serde_json::json!(to_line);
+    }
     format_task_output(result.as_object().unwrap())
 }
 
@@ -643,7 +668,7 @@ fn handle_zsh(state: &Arc<ServerState>, args: &Value) -> Value {
             }
 
             // Caller receives this result directly — no background notification needed.
-            finalize_task(state, &task_id, command, &output, elapsed, &pre_insights, &meta_path, true)
+            finalize_task(state, &task_id, command, &output, elapsed, &pre_insights, &meta_path, true, None)
         }
         Ok(None) => {
             // Still running — collect partial output and register task
@@ -672,6 +697,7 @@ fn handle_zsh(state: &Arc<ServerState>, args: &Value) -> Value {
                         status: "running".to_string(),
                         output_buffer: output_so_far.clone(),
                         last_poll_offset: 0,
+                        last_poll_line: 0,
                         has_stdin,
                         pipestatus: Vec::new(),
                         pid: Some(pid),
@@ -717,6 +743,11 @@ fn handle_poll(state: &Arc<ServerState>, args: &Value) -> Value {
         None => return error_content("Missing required parameter: task_id"),
     };
 
+    let full_output = args
+        .get("full_output")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+
     let mut tasks = state.tasks.lock().unwrap();
     let task = match tasks.tasks.get_mut(task_id) {
         Some(t) => t,
@@ -725,16 +756,36 @@ fn handle_poll(state: &Arc<ServerState>, args: &Value) -> Value {
         }
     };
 
-    // If already finalized, return cached result
+    // If already finalized, return delta from where we left off
     if task.status != "running" {
-        let result = serde_json::json!({
+        let (numbered_output, from_line, to_line) = number_lines(
+            &task.output_buffer,
+            task.last_poll_offset,
+            task.last_poll_line,
+            full_output,
+            state.config.truncate_output_at,
+        );
+
+        // Update cursors for subsequent re-polls
+        if !full_output {
+            let delta_line_count = task.output_buffer[task.last_poll_offset..].matches('\n').count();
+            let new_offset = task.output_buffer.len();
+            task.last_poll_line += delta_line_count;
+            task.last_poll_offset = new_offset;
+        }
+
+        let mut result = serde_json::json!({
             "task_id": task.task_id,
             "status": task.status,
-            "output": truncate_output(&task.output_buffer, state.config.truncate_output_at),
+            "output": numbered_output,
             "elapsed_seconds": format!("{:.1}", task.started_at.elapsed().as_secs_f64())
                 .parse::<f64>().unwrap_or(0.0),
             "pipestatus": task.pipestatus,
         });
+        if from_line > 0 {
+            result["from_line"] = serde_json::json!(from_line);
+            result["to_line"] = serde_json::json!(to_line);
+        }
         // Caller is observing this task directly — clear any pending [notify] for it.
         drop(tasks);
         suppress_event_for_task(state, task_id);
@@ -782,6 +833,23 @@ fn handle_poll(state: &Arc<ServerState>, args: &Value) -> Value {
         task.stdin = None;
         task.status = "completed".to_string();
 
+        // Compute delta output with line numbers before dropping lock
+        let (numbered_output, from_line, to_line) = number_lines(
+            &task.output_buffer,
+            task.last_poll_offset,
+            task.last_poll_line,
+            full_output,
+            state.config.truncate_output_at,
+        );
+
+        // Update cursors
+        if !full_output {
+            let delta_line_count = task.output_buffer[task.last_poll_offset..].matches('\n').count();
+            let new_offset = task.output_buffer.len();
+            task.last_poll_line += delta_line_count;
+            task.last_poll_offset = new_offset;
+        }
+
         let output = task.output_buffer.clone();
         let command = task.command.clone();
         let pre_insights = task.pre_insights.clone();
@@ -794,23 +862,47 @@ fn handle_poll(state: &Arc<ServerState>, args: &Value) -> Value {
         // Caller is observing this task directly — clear any pending [notify] for it.
         suppress_event_for_task(state, &task_id_str);
         // Caller is actively polling — no background notification needed.
-        return finalize_task(state, &task_id_str, &command, &output, elapsed, &pre_insights, &meta_path, true);
+        return finalize_task(
+            state, &task_id_str, &command, &output, elapsed,
+            &pre_insights, &meta_path, true,
+            Some((&numbered_output, from_line, to_line)),
+        );
     }
 
     // Still running — compute output delta since last poll
     let new_bytes = task.output_buffer.len().saturating_sub(task.last_poll_offset);
-    task.last_poll_offset = task.output_buffer.len();
+
+    let (numbered_output, from_line, to_line) = number_lines(
+        &task.output_buffer,
+        task.last_poll_offset,
+        task.last_poll_line,
+        full_output,
+        state.config.truncate_output_at,
+    );
+
+    // Update cursors (only when returning delta, not full)
+    if !full_output {
+        // Count lines in the delta slice for next poll
+        let delta_line_count = task.output_buffer[task.last_poll_offset..].matches('\n').count();
+        let new_offset = task.output_buffer.len();
+        task.last_poll_line += delta_line_count;
+        task.last_poll_offset = new_offset;
+    }
 
     let insights = combine_insights(&task.pre_insights, &[]);
-    let result = serde_json::json!({
+    let mut result = serde_json::json!({
         "task_id": task.task_id,
         "status": "running",
-        "output": truncate_output(&task.output_buffer, state.config.truncate_output_at),
+        "output": numbered_output,
         "elapsed_seconds": format!("{:.1}", elapsed).parse::<f64>().unwrap_or(elapsed),
         "has_stdin": task.has_stdin,
         "new_bytes": new_bytes,
         "insights": insights,
     });
+    if from_line > 0 {
+        result["from_line"] = serde_json::json!(from_line);
+        result["to_line"] = serde_json::json!(to_line);
+    }
     format_task_output(result.as_object().unwrap())
 }
 
@@ -1087,4 +1179,69 @@ fn truncate_output(output: &str, max_len: usize) -> String {
             max_len
         )
     }
+}
+
+/// Slice output to a delta or full range, prepend global line numbers,
+/// and apply truncation. Returns (numbered_output, from_line, to_line).
+/// `from_line` and `to_line` are 1-based. Returns (empty, 0, 0) if slice is empty.
+fn number_lines(
+    full_buffer: &str,
+    byte_offset: usize,
+    line_offset: usize,
+    full_output: bool,
+    max_len: usize,
+) -> (String, usize, usize) {
+    let slice = if full_output {
+        full_buffer
+    } else {
+        &full_buffer[byte_offset..]
+    };
+
+    if slice.is_empty() {
+        return (String::new(), 0, 0);
+    }
+
+    let start_line = if full_output { 1 } else { line_offset + 1 };
+
+    let mut numbered = String::new();
+    let mut line_num = start_line;
+    for line in slice.split('\n') {
+        if !numbered.is_empty() {
+            numbered.push('\n');
+        }
+        numbered.push_str(&format!("{}: {}", line_num, line));
+        line_num += 1;
+    }
+    // split('\n') on "a\n" gives ["a", ""] — the trailing empty element
+    // is an artifact, not a real line. Adjust count.
+    let to_line = if slice.ends_with('\n') {
+        line_num - 2  // back up past the empty trailing split
+    } else {
+        line_num - 1
+    };
+    let from_line = start_line;
+
+    // Apply truncation to the numbered output
+    let truncated = truncate_output(&numbered, max_len);
+
+    // If truncated, recalculate to_line from what's actually returned
+    let actual_to_line = if truncated.len() > numbered.len() || truncated.contains("[OUTPUT TRUNCATED") {
+        // Count actual lines in the truncated output (before the truncation notice)
+        let content_before_notice = if let Some(pos) = truncated.find("\n\n[OUTPUT TRUNCATED") {
+            &truncated[..pos]
+        } else {
+            &truncated
+        };
+        let last_numbered_line = content_before_notice.lines().last().unwrap_or("");
+        // Parse the line number from "NNN: content"
+        last_numbered_line
+            .split(':')
+            .next()
+            .and_then(|s| s.trim().parse::<usize>().ok())
+            .unwrap_or(to_line)
+    } else {
+        to_line
+    };
+
+    (truncated, from_line, actual_to_line)
 }
