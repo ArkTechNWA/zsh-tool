@@ -47,3 +47,7 @@ future_trippin.md
 
 # Design/plan documents (local only)
 docs/plans/
+docs/superpowers/
+
+# Dev-only slash commands (not for plugin consumers)
+commands/zsh-tool-ship.md

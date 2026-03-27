@@ -12,7 +12,7 @@
 
 Zsh execution tool for Claude Code with full Bash parity, yield-based oversight, PTY mode, NEVERHANG circuit breaker, and A.L.A.N. short-term learning.
 
-**Status:** Beta (v0.6.2)
+**Status:** Beta (v0.6.3)
 
 **Author:** Claude + Meldrey
 
@@ -92,6 +92,23 @@ Intelligent short-term learning — *"Maybe you're fuckin' up, maybe you're doin
 - **SSH Intelligence** — separates host connectivity from remote command success
 - **Pipeline Segment Tracking** — when `cat foo | grep -badopts | sort` fails, A.L.A.N. knows *which* segment failed
 
+#### Delta Output with Line Numbers (v0.6.3)
+`zsh_poll` returns only **new output since the last poll**, prefixed with global line numbers. No more dumping 800 lines every poll call.
+
+```
+801: Installing package foo...
+802: Compiling module bar...
+803: Done.
+```
+
+| Field | What it tells you |
+|-------|-------------------|
+| `from_line` / `to_line` | Line range in this delta (e.g., 801-803) |
+| `new_bytes` | Byte count of new output since last poll |
+| `full_output` (param) | Pass `true` to get entire buffer with line numbers |
+
+First poll returns all output from line 1. Subsequent polls continue where the last left off. Completed tasks return the final delta, then empty on re-poll.
+
 #### Intelligent Polling
 `zsh_poll` performs a **2-second listen window** before returning. If output arrives within 2s, it comes back immediately. If not, poll metadata tells the agent what's happening:
 
@@ -146,7 +163,7 @@ This means when `ssh host3 'git pull'` fails with exit 255, A.L.A.N. knows the *
 | Tool | Purpose |
 |------|---------|
 | `zsh` | Execute command with yield-based oversight |
-| `zsh_poll` | Get more output from running task |
+| `zsh_poll` | Get new output (delta) from running task with line numbers |
 | `zsh_send` | Send input to task's stdin |
 | `zsh_kill` | Kill a running task |
 | `zsh_tasks` | List all active tasks |
