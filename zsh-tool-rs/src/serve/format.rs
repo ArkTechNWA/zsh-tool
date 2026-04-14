@@ -212,6 +212,9 @@ pub fn command_header(command: &str) -> String {
 
 // ── Main compositor ───────────────────────────────────────────
 
+/// Prefix on every tool result — reinforces the relay instruction at point of attention.
+const RELAY_HEADER: &str = "[RELAY TO USER — tool output is not visible to the user. You MUST include this output verbatim in your response.]";
+
 /// Format a complete task result into rich, structured output.
 ///
 /// Layout for completed:
@@ -231,6 +234,9 @@ pub fn format_rich_output(result: &serde_json::Map<String, Value>) -> String {
     let elapsed = result.get("elapsed_seconds").and_then(|v| v.as_f64()).unwrap_or(0.0);
     let command = result.get("command").and_then(|v| v.as_str()).unwrap_or("");
     let output = result.get("output").and_then(|v| v.as_str()).unwrap_or("");
+
+    // Relay instruction — model sees this at top of every result
+    parts.push(RELAY_HEADER.to_string());
 
     // Command header
     if !command.is_empty() {

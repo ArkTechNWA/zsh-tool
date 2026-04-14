@@ -28,8 +28,8 @@ fi
 if [ "$NEEDS_BUILD" = true ]; then
     echo "zsh-tool: Source changed, rebuilding..." >&2
     cd "${PLUGIN_ROOT}/zsh-tool-rs"
-    cargo clean -p zsh-tool-exec --release --quiet 2>/dev/null || true
     cargo build --release --quiet 2>&1 >&2
+    touch "$BINARY" 2>/dev/null || true
     echo "zsh-tool: Build complete." >&2
 fi
 
