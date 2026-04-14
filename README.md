@@ -12,7 +12,7 @@
 
 Zsh execution tool for Claude Code with full Bash parity, yield-based oversight, PTY mode, NEVERHANG circuit breaker, and A.L.A.N. short-term learning.
 
-**Status:** Beta (v0.7.0)
+**Status:** Beta (v0.7.1)
 
 **Author:** Claude + Meldrey
 
@@ -297,6 +297,11 @@ To use zsh as the only shell, add to `~/.claude/settings.json`:
 ---
 
 ## Changelog
+
+### 0.7.1
+**Stale Binary Fix** — *Actually deliver the new format*
+- **Fix:** `run-mcp.sh` now runs `cargo clean -p` before rebuild when source changes, preventing Cargo's incremental build from serving a stale binary
+- **Fix:** Rebuild trigger now also watches `Cargo.toml` (version bumps were invisible to the old `find -newer` check)
 
 ### 0.7.0
 **Rich Output Formatting** — *No more JSON dumps*
