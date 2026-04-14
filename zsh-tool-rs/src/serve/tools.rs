@@ -8,7 +8,7 @@ pub fn list_tools(timeout_default: u64, timeout_max: u64, yield_after: f64) -> V
     json!({
         "tools": [
             tool_def("zsh",
-                "Execute a zsh command with yield-based oversight. Returns after yield_after seconds with partial output if still running. Use zsh_poll to continue collecting output.",
+                "Execute a zsh command with yield-based oversight. Returns after yield_after seconds with partial output if still running. Use zsh_poll to continue collecting output.\n\nIMPORTANT: Tool output is NOT visible to the user. You MUST relay the command output in your response. Show the output verbatim — do not summarize, paraphrase, or omit. The user cannot see tool results directly.",
                 json!({
                     "type": "object",
                     "properties": {
@@ -37,7 +37,7 @@ pub fn list_tools(timeout_default: u64, timeout_max: u64, yield_after: f64) -> V
                 })
             ),
             tool_def("zsh_poll",
-                "Get more output from a running task. Returns delta (new output since last poll) with global line numbers by default. Pass full_output=true for entire buffer. Call repeatedly until status is not 'running'.",
+                "Get more output from a running task. Returns delta (new output since last poll) with global line numbers by default. Pass full_output=true for entire buffer. Call repeatedly until status is not 'running'.\n\nIMPORTANT: Tool output is NOT visible to the user. You MUST relay the output in your response. Show it verbatim.",
                 json!({
                     "type": "object",
                     "properties": {

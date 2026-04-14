@@ -12,7 +12,7 @@
 
 Zsh execution tool for Claude Code with full Bash parity, yield-based oversight, PTY mode, NEVERHANG circuit breaker, and A.L.A.N. short-term learning.
 
-**Status:** Beta (v0.7.1)
+**Status:** Beta (v0.7.2)
 
 **Author:** Claude + Meldrey
 
@@ -297,6 +297,11 @@ To use zsh as the only shell, add to `~/.claude/settings.json`:
 ---
 
 ## Changelog
+
+### 0.7.2
+**User-Visible Output** — *Tell the model to show its work*
+- **Fix:** MCP tool results are invisible to users in Claude Code (platform limitation). Tool descriptions now instruct the model to relay command output verbatim in its response text.
+- This is a workaround for Claude Code not rendering MCP tool result blocks to users.
 
 ### 0.7.1
 **Stale Binary Fix** — *Actually deliver the new format*
