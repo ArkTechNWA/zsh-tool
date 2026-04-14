@@ -17,10 +17,19 @@ fi
 # Ensure data directory exists
 mkdir -p "$(dirname "$ALAN_DB_PATH")"
 
-# Build if binary missing or older than source
-if [ ! -f "$BINARY" ] || [ "$(find "${PLUGIN_ROOT}/zsh-tool-rs/src" -newer "$BINARY" 2>/dev/null | head -1)" ]; then
-    echo "zsh-tool: Building Rust binary..." >&2
-    (cd "${PLUGIN_ROOT}/zsh-tool-rs" && cargo build --release --quiet 2>&1) >&2
+# Build if binary missing or older than source/Cargo.toml
+NEEDS_BUILD=false
+if [ ! -f "$BINARY" ]; then
+    NEEDS_BUILD=true
+elif [ "$(find "${PLUGIN_ROOT}/zsh-tool-rs/src" "${PLUGIN_ROOT}/zsh-tool-rs/Cargo.toml" -newer "$BINARY" 2>/dev/null | head -1)" ]; then
+    NEEDS_BUILD=true
+fi
+
+if [ "$NEEDS_BUILD" = true ]; then
+    echo "zsh-tool: Source changed, rebuilding..." >&2
+    cd "${PLUGIN_ROOT}/zsh-tool-rs"
+    cargo clean -p zsh-tool-exec --release --quiet 2>/dev/null || true
+    cargo build --release --quiet 2>&1 >&2
     echo "zsh-tool: Build complete." >&2
 fi
 
