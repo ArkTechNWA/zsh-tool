@@ -2,6 +2,7 @@
 //!
 //! Handles initialize, tools/list, tools/call, and notifications.
 
+pub mod format;
 pub mod protocol;
 pub mod tools;
 
@@ -233,183 +234,6 @@ fn handle_tool_call(state: &Arc<ServerState>, tool_name: &str, args: &Value) -> 
     prepend_events(state, result)
 }
 
-// ANSI color constants
-const C_GREEN: &str = "\x1b[32m";
-const C_RED: &str = "\x1b[31m";
-const C_YELLOW: &str = "\x1b[33m";
-const C_CYAN: &str = "\x1b[36m";
-const C_DIM: &str = "\x1b[2m";
-const C_RESET: &str = "\x1b[0m";
-
-fn color_exit(code: i32) -> String {
-    if code == 0 {
-        format!("{}{}{}", C_GREEN, code, C_RESET)
-    } else if code > 128 {
-        format!("{}{}{}", C_YELLOW, code, C_RESET)
-    } else {
-        format!("{}{}{}", C_RED, code, C_RESET)
-    }
-}
-
-fn format_task_output(result: &serde_json::Map<String, Value>) -> Value {
-    let mut parts: Vec<String> = Vec::new();
-
-    // Output first — clean, untouched
-    let output = result
-        .get("output")
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
-    if !output.trim().is_empty() {
-        parts.push(output.trim_end_matches('\n').to_string());
-    } else if result.get("status").and_then(|v| v.as_str()) == Some("completed")
-        && output.trim().is_empty()
-    {
-        parts.push(format!("{}(no output){}", C_DIM, C_RESET));
-    }
-
-    // Error
-    if let Some(error) = result.get("error").and_then(|v| v.as_str()) {
-        parts.push(format!("{}[error]{} {}", C_RED, C_RESET, error));
-    }
-
-    // Status line
-    let status = result
-        .get("status")
-        .and_then(|v| v.as_str())
-        .unwrap_or("unknown");
-    let task_id = result
-        .get("task_id")
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
-    let elapsed = result
-        .get("elapsed_seconds")
-        .and_then(|v| v.as_f64())
-        .unwrap_or(0.0);
-
-    match status {
-        "running" => {
-            let has_stdin = result
-                .get("has_stdin")
-                .and_then(|v| v.as_bool())
-                .unwrap_or(false);
-            let new_bytes = result
-                .get("new_bytes")
-                .and_then(|v| v.as_u64())
-                .unwrap_or(0);
-            let from_line = result
-                .get("from_line")
-                .and_then(|v| v.as_u64())
-                .unwrap_or(0);
-            let to_line = result
-                .get("to_line")
-                .and_then(|v| v.as_u64())
-                .unwrap_or(0);
-
-            let delta_str = if from_line > 0 && to_line > 0 {
-                format!(" — lines {}-{}", from_line, to_line)
-            } else if new_bytes >= 1024 {
-                format!(" — {:.1} KB new", new_bytes as f64 / 1024.0)
-            } else if new_bytes > 0 {
-                format!(" — {} B new", new_bytes)
-            } else {
-                String::new()
-            };
-            parts.push(format!(
-                "{}[RUNNING{} task_id={} elapsed={:.1}s stdin={}{}{}]{}",
-                C_CYAN,
-                C_RESET,
-                task_id,
-                elapsed,
-                if has_stdin { "yes" } else { "no" },
-                delta_str,
-                C_CYAN,
-                C_RESET
-            ));
-            parts.push("Use zsh_poll to continue, zsh_send to input, zsh_kill to stop.".into());
-        }
-        "completed" => {
-            let pipestatus: Vec<i32> = result
-                .get("pipestatus")
-                .and_then(|v| v.as_array())
-                .map(|a| {
-                    a.iter()
-                        .filter_map(|v| v.as_i64().map(|n| n as i32))
-                        .collect()
-                })
-                .unwrap_or_else(|| vec![0]);
-
-            let overall = *pipestatus.last().unwrap_or(&0);
-            let (word, bracket_close) = if overall == 0 {
-                (
-                    format!("{}[COMPLETED", C_GREEN),
-                    format!("{}]{}", C_GREEN, C_RESET),
-                )
-            } else {
-                (
-                    format!("{}[FAILED", C_RED),
-                    format!("{}]{}", C_RED, C_RESET),
-                )
-            };
-
-            let mut exit_str = format!("exit={}", color_exit(overall));
-            if pipestatus.len() > 1 {
-                let colored: Vec<String> = pipestatus.iter().map(|&c| color_exit(c)).collect();
-                exit_str.push_str(&format!(" pipestatus=[{}]", colored.join(",")));
-            }
-            parts.push(format!(
-                "{}{} task_id={} elapsed={:.1}s {}{}",
-                word, C_RESET, task_id, elapsed, exit_str, bracket_close
-            ));
-        }
-        "timeout" => {
-            parts.push(format!(
-                "{}[TIMEOUT{} task_id={} elapsed={:.1}s{}]{}",
-                C_YELLOW, C_RESET, task_id, elapsed, C_YELLOW, C_RESET
-            ));
-        }
-        "killed" => {
-            parts.push(format!(
-                "{}[KILLED{} task_id={} elapsed={:.1}s{}]{}",
-                C_RED, C_RESET, task_id, elapsed, C_RED, C_RESET
-            ));
-        }
-        "error" => {
-            parts.push(format!(
-                "{}[ERROR{} task_id={} elapsed={:.1}s{}]{}",
-                C_RED, C_RESET, task_id, elapsed, C_RED, C_RESET
-            ));
-        }
-        _ => {}
-    }
-
-    // ALAN insights
-    if let Some(insights) = result.get("insights").and_then(|v| v.as_object()) {
-        for (level, messages) in insights {
-            if let Some(arr) = messages.as_array() {
-                let joined: Vec<&str> = arr.iter().filter_map(|v| v.as_str()).collect();
-                if !joined.is_empty() {
-                    let msg = joined.join(" | ");
-                    if level == "warning" {
-                        parts.push(format!(
-                            "{}[warning: A.L.A.N.: {}]{}",
-                            C_YELLOW, msg, C_RESET
-                        ));
-                    } else {
-                        parts.push(format!("{}[info: A.L.A.N.: {}]{}", C_DIM, msg, C_RESET));
-                    }
-                }
-            }
-        }
-    }
-
-    let text = if parts.is_empty() {
-        "(no output)".to_string()
-    } else {
-        parts.join("\n")
-    };
-    text_content(&text)
-}
-
 // --- Tool handlers ---
 
 /// Non-blocking read of available bytes from a ChildStdout.
@@ -522,6 +346,7 @@ fn finalize_task(
     let mut result = serde_json::json!({
         "success": overall_exit == 0,
         "task_id": task_id,
+        "command": command,
         "status": "completed",
         "output": final_output,
         "elapsed_seconds": format!("{:.1}", elapsed).parse::<f64>().unwrap_or(elapsed),
@@ -532,7 +357,7 @@ fn finalize_task(
         result["from_line"] = serde_json::json!(from_line);
         result["to_line"] = serde_json::json!(to_line);
     }
-    format_task_output(result.as_object().unwrap())
+    text_content(&format::format_rich_output(result.as_object().unwrap()))
 }
 
 fn handle_zsh(state: &Arc<ServerState>, args: &Value) -> Value {
@@ -561,12 +386,13 @@ fn handle_zsh(state: &Arc<ServerState>, args: &Value) -> Value {
             let result = serde_json::json!({
                 "success": false,
                 "error": error_msg,
+                "command": command,
                 "task_id": "",
                 "status": "error",
                 "output": "",
                 "elapsed_seconds": 0,
             });
-            return format_task_output(result.as_object().unwrap());
+            return text_content(&format::format_rich_output(result.as_object().unwrap()));
         }
     }
 
@@ -626,12 +452,13 @@ fn handle_zsh(state: &Arc<ServerState>, args: &Value) -> Value {
             let result = serde_json::json!({
                 "success": false,
                 "error": format!("Failed to spawn executor: {}", e),
+                "command": command,
                 "task_id": task_id,
                 "status": "error",
                 "output": "",
                 "elapsed_seconds": 0,
             });
-            return format_task_output(result.as_object().unwrap());
+            return text_content(&format::format_rich_output(result.as_object().unwrap()));
         }
     };
 
@@ -715,24 +542,26 @@ fn handle_zsh(state: &Arc<ServerState>, args: &Value) -> Value {
 
             let result = serde_json::json!({
                 "task_id": task_id,
+                "command": command,
                 "status": "running",
                 "output": truncate_output(&output_so_far, state.config.truncate_output_at),
                 "elapsed_seconds": format!("{:.1}", elapsed).parse::<f64>().unwrap_or(elapsed),
                 "has_stdin": has_stdin,
                 "insights": insights,
             });
-            format_task_output(result.as_object().unwrap())
+            text_content(&format::format_rich_output(result.as_object().unwrap()))
         }
         Err(e) => {
             let result = serde_json::json!({
                 "success": false,
                 "error": format!("Process wait error: {}", e),
+                "command": command,
                 "task_id": task_id,
                 "status": "error",
                 "output": "",
                 "elapsed_seconds": 0,
             });
-            format_task_output(result.as_object().unwrap())
+            text_content(&format::format_rich_output(result.as_object().unwrap()))
         }
     }
 }
@@ -776,6 +605,7 @@ fn handle_poll(state: &Arc<ServerState>, args: &Value) -> Value {
 
         let mut result = serde_json::json!({
             "task_id": task.task_id,
+            "command": task.command,
             "status": task.status,
             "output": numbered_output,
             "elapsed_seconds": format!("{:.1}", task.started_at.elapsed().as_secs_f64())
@@ -789,7 +619,7 @@ fn handle_poll(state: &Arc<ServerState>, args: &Value) -> Value {
         // Caller is observing this task directly — clear any pending [notify] for it.
         drop(tasks);
         suppress_event_for_task(state, task_id);
-        return format_task_output(result.as_object().unwrap());
+        return text_content(&format::format_rich_output(result.as_object().unwrap()));
     }
 
     // Read any new output
@@ -892,6 +722,7 @@ fn handle_poll(state: &Arc<ServerState>, args: &Value) -> Value {
     let insights = combine_insights(&task.pre_insights, &[]);
     let mut result = serde_json::json!({
         "task_id": task.task_id,
+        "command": task.command,
         "status": "running",
         "output": numbered_output,
         "elapsed_seconds": format!("{:.1}", elapsed).parse::<f64>().unwrap_or(elapsed),
@@ -903,7 +734,7 @@ fn handle_poll(state: &Arc<ServerState>, args: &Value) -> Value {
         result["from_line"] = serde_json::json!(from_line);
         result["to_line"] = serde_json::json!(to_line);
     }
-    format_task_output(result.as_object().unwrap())
+    text_content(&format::format_rich_output(result.as_object().unwrap()))
 }
 
 fn handle_send(state: &Arc<ServerState>, args: &Value) -> Value {
@@ -978,17 +809,19 @@ fn handle_kill(state: &Arc<ServerState>, args: &Value) -> Value {
             let elapsed = task.started_at.elapsed().as_secs_f64();
             let output = task.output_buffer.clone();
             let tid = task.task_id.clone();
+            let cmd = task.command.clone();
 
             // Remove from registry
             tasks.tasks.remove(task_id);
 
             let result = serde_json::json!({
                 "task_id": tid,
+                "command": cmd,
                 "status": "killed",
                 "output": truncate_output(&output, state.config.truncate_output_at),
                 "elapsed_seconds": format!("{:.1}", elapsed).parse::<f64>().unwrap_or(elapsed),
             });
-            format_task_output(result.as_object().unwrap())
+            text_content(&format::format_rich_output(result.as_object().unwrap()))
         }
         Some(_) => error_content(&format!("Task {} is not running", task_id)),
         None => error_content(&format!("Unknown task: {}", task_id)),
@@ -1134,20 +967,11 @@ fn drain_events(state: &Arc<ServerState>) -> String {
     if queue.is_empty() {
         return String::new();
     }
-    let lines: Vec<String> = queue.drain(..).map(|ev| {
-        if ev.exit_code == 0 {
-            format!(
-                "{}[notify]{} task '{}' completed (exit=0, {:.1}s) — use zsh_poll to retrieve output",
-                C_DIM, C_RESET, ev.task_id, ev.elapsed
-            )
-        } else {
-            format!(
-                "{}[notify]{} task '{}' failed (exit={}, {:.1}s) — use zsh_poll to retrieve output",
-                C_YELLOW, C_RESET, ev.task_id, ev.exit_code, ev.elapsed
-            )
-        }
-    }).collect();
-    lines.join("\n")
+    let events: Vec<(String, i32, f64)> = queue
+        .drain(..)
+        .map(|ev| (ev.task_id.clone(), ev.exit_code, ev.elapsed))
+        .collect();
+    format::format_notifications(&events)
 }
 
 /// Prepend any pending background task notifications to a tool response.

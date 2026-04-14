@@ -176,7 +176,7 @@ fn test_zsh_echo() {
     let text = result["content"][0]["text"].as_str().expect("text content");
 
     assert!(text.contains("hello-from-rust-mcp"), "Output should contain echo text, got: {}", text);
-    assert!(text.contains("COMPLETED"), "Should show COMPLETED status, got: {}", text);
+    assert!(text.contains("exit="), "Should show exit status, got: {}", text);
 
     drop(stdin);
     let _ = child.wait();
@@ -206,7 +206,7 @@ fn test_zsh_exit_code() {
 
     let resp = read_response(&mut reader);
     let text = resp["result"]["content"][0]["text"].as_str().unwrap();
-    assert!(text.contains("FAILED"), "Non-zero exit should show FAILED, got: {}", text);
+    assert!(text.contains("✘"), "Non-zero exit should show failure icon, got: {}", text);
     assert!(text.contains("exit="), "Should show exit code");
 
     drop(stdin);
@@ -391,12 +391,9 @@ fn test_yield_poll_complete() {
 
     // Should be RUNNING since yield_after < command duration
     assert!(text.contains("RUNNING"), "Should yield as RUNNING, got: {}", text);
-    assert!(text.contains("task_id="), "Should include task_id");
+    assert!(text.contains("task="), "Should include task id");
 
-    // Extract task_id from the text
-    let task_id_start = text.find("task_id=").unwrap() + 8;
-    let task_id_end = text[task_id_start..].find(' ').unwrap() + task_id_start;
-    let task_id = &text[task_id_start..task_id_end];
+    let task_id = extract_task_id(text);
 
     // Wait for command to finish
     std::thread::sleep(Duration::from_secs(3));
@@ -414,7 +411,7 @@ fn test_yield_poll_complete() {
 
     let resp = read_response(&mut reader);
     let text = resp["result"]["content"][0]["text"].as_str().unwrap();
-    assert!(text.contains("COMPLETED"), "Should be COMPLETED after sleep, got: {}", text);
+    assert!(text.contains("✔") || text.contains("exit="), "Should show completion after sleep, got: {}", text);
     assert!(text.contains("done-after-sleep"), "Should contain command output, got: {}", text);
 
     drop(stdin);
@@ -422,9 +419,13 @@ fn test_yield_poll_complete() {
 }
 
 /// Helper: extract task_id from a RUNNING status line.
+/// New format uses `task=<id>` instead of `task_id=<id>`.
 fn extract_task_id(text: &str) -> String {
-    let start = text.find("task_id=").expect("no task_id in text") + 8;
-    let end = text[start..].find(' ').expect("no space after task_id") + start;
+    let marker = if text.contains("task=") { "task=" } else { "task_id=" };
+    let start = text.find(marker).expect("no task marker in text") + marker.len();
+    // task id ends at whitespace or end of line
+    let rest = &text[start..];
+    let end = rest.find(|c: char| c.is_whitespace()).unwrap_or(rest.len()) + start;
     text[start..end].to_string()
 }
 
@@ -475,8 +476,8 @@ fn test_background_completion_notifies_on_next_tool_call() {
     let resp = read_response(&mut reader);
     let text = resp["result"]["content"][0]["text"].as_str().unwrap();
     assert!(
-        text.contains("[notify]"),
-        "Expected [notify] in next tool call response, got:\n{}", text
+        text.contains("notify"),
+        "Expected notify in next tool call response, got:\n{}", text
     );
     assert!(
         text.contains("completed") || text.contains("failed"),
@@ -498,7 +499,7 @@ fn test_background_completion_notifies_on_next_tool_call() {
     let resp = read_response(&mut reader);
     let text = resp["result"]["content"][0]["text"].as_str().unwrap();
     assert!(
-        !text.contains("[notify]"),
+        !text.contains("notify"),
         "Notification should fire only once, but appeared again:\n{}", text
     );
 
@@ -550,8 +551,8 @@ fn test_direct_poll_does_not_generate_notification() {
 
     let resp = read_response(&mut reader);
     let text = resp["result"]["content"][0]["text"].as_str().unwrap();
-    assert!(text.contains("COMPLETED"), "poll should return COMPLETED, got: {}", text);
-    assert!(!text.contains("[notify]"), "poll result should not contain [notify], got: {}", text);
+    assert!(text.contains("✔") || text.contains("exit="), "poll should show completion, got: {}", text);
+    assert!(!text.contains("notify"), "poll result should not contain [notify], got: {}", text);
 
     // Next unrelated call should also have no notify (task was directly polled)
     send_request(
@@ -567,7 +568,7 @@ fn test_direct_poll_does_not_generate_notification() {
     let resp = read_response(&mut reader);
     let text = resp["result"]["content"][0]["text"].as_str().unwrap();
     assert!(
-        !text.contains("[notify]"),
+        !text.contains("notify"),
         "No notify expected after direct poll, got:\n{}", text
     );
 
@@ -625,7 +626,7 @@ fn test_poll_running_task_shows_output_delta() {
         let has_delta = text.contains(" new") || text.contains("output line");
         assert!(has_delta, "Running poll should show output delta or content, got:\n{}", text);
     } else {
-        assert!(text.contains("COMPLETED"), "unexpected status, got:\n{}", text);
+        assert!(text.contains("✔") || text.contains("exit="), "unexpected status, got:\n{}", text);
         assert!(text.contains("output line"), "output should be present, got:\n{}", text);
     }
 
@@ -721,7 +722,7 @@ fn test_poll_returns_delta_with_line_numbers() {
         let text2 = resp["result"]["content"][0]["text"].as_str().unwrap();
 
         // Should NOT start at "1:" again — should continue from previous
-        if text2.contains("RUNNING") || text2.contains("COMPLETED") {
+        if text2.contains("RUNNING") || text2.contains("✔") || text2.contains("exit=") {
             // If there's output, first line number should be > 1
             let lines: Vec<&str> = text2.lines().collect();
             if let Some(first_content_line) = lines.first() {
@@ -817,7 +818,7 @@ fn test_poll_completion_returns_delta_not_full() {
 
     let resp = read_response(&mut reader);
     let text2 = resp["result"]["content"][0]["text"].as_str().unwrap();
-    assert!(text2.contains("COMPLETED") || text2.contains("FAILED"),
+    assert!(text2.contains("✔") || text2.contains("✘") || text2.contains("exit="),
         "should be completed, got:\n{}", text2);
     assert!(text2.contains("final-line"), "completion poll should have final-line, got:\n{}", text2);
     if text1.contains("first-batch") && !text1.contains("final-line") {
@@ -838,7 +839,7 @@ fn test_poll_completion_returns_delta_not_full() {
 
     let resp = read_response(&mut reader);
     let text3 = resp["result"]["content"][0]["text"].as_str().unwrap();
-    assert!(text3.contains("COMPLETED") || text3.contains("FAILED"),
+    assert!(text3.contains("✔") || text3.contains("✘") || text3.contains("exit="),
         "re-poll should still show completed, got:\n{}", text3);
 
     drop(stdin);

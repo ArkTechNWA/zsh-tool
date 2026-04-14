@@ -12,7 +12,7 @@
 
 Zsh execution tool for Claude Code with full Bash parity, yield-based oversight, PTY mode, NEVERHANG circuit breaker, and A.L.A.N. short-term learning.
 
-**Status:** Beta (v0.6.3)
+**Status:** Beta (v0.7.0)
 
 **Author:** Claude + Meldrey
 
@@ -260,6 +260,7 @@ zsh-tool/
 │       │   └── stats.rs     #   Database statistics
 │       └── serve/           # MCP JSON-RPC server
 │           ├── mod.rs       #   Request dispatch + tool handlers
+│           ├── format.rs    #   Rich output formatting
 │           ├── protocol.rs  #   JSON-RPC framing
 │           └── tools.rs     #   Tool schema definitions
 ├── scripts/
@@ -296,6 +297,18 @@ To use zsh as the only shell, add to `~/.claude/settings.json`:
 ---
 
 ## Changelog
+
+### 0.7.0
+**Rich Output Formatting** — *No more JSON dumps*
+- **Structured output** — command header, separator-divided sections, status footer with icons
+- **Visual status icons** — `✔` / `✘` replace `[COMPLETED` / `[FAILED` brackets
+- **Progress consolidation** — consecutive progress lines (e.g., `10%`, `20%`, `30%`) collapsed to show only the latest, preventing screen spam during downloads/builds
+- **Command echo** — `$ command` header shows what ran, truncated at 120 chars
+- **Colored exit codes** — green=0, red=nonzero, yellow=signal (129+)
+- **Richer notifications** — background task completions use `┌ notify:` with failure coloring
+- **ALAN insight icons** — `⚠` for warnings, `ℹ` for info
+- **New `format.rs` module** — all formatting extracted from mod.rs into isolated, testable module
+- **35 new tests** (121 total) covering all formatting functions
 
 ### 0.6.1
 **Protocol Fix** — *Bare JSON-RPC support for Claude Code v2.1+*
